@@ -78,7 +78,7 @@ def Ic_tape(b: float, theta: float) -> float:
 def Je_tape(b: float, theta: float) -> float:
     """
     Engineering current density [A/mm²] at field b and angle theta,
-    derated by 40% fill factor.
+    derated by 90% fill factor.
 
     Parameters
     ----------
@@ -92,9 +92,9 @@ def Je_tape(b: float, theta: float) -> float:
     ic          = Ic_tape(b, theta)          # [A]      for tape of width w_tape_mm
     ic_w        = ic / w_tape_mm             # [A/mm]   per mm of tape width
     jc_tape_mm2 = ic_w / t_tape_mm           # [A/mm²]  over full tape cross-section
-    je_40       = jc_tape_mm2 * (1 - margin)   # [A/mm²]  40% derated engineering Je
+    je_max       = jc_tape_mm2 * (1 - margin)   # [A/mm²]  90% derated engineering Je
 
-    return jc_tape_mm2, je_40
+    return jc_tape_mm2, je_max
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -270,7 +270,7 @@ def solenoid_summary(ri: float, rf: float,
     # Ic and Je at operating field
     ic_op  = Ic_tape(b0, theta)              # [A]     for tape of width w_tape_mm
     ic_abs = ic_op * (w_tape_mm * 1e-3)      # [A]     for one tape (SI width)
-    je_op  = Je_tape(b0, theta)              # [A/mm²] engineering Je, 40% derated
+    je_op  = Je_tape(b0, theta)              # [A/mm²] engineering Je, 90% derated
 
     return {
         # Geometry
