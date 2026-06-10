@@ -78,46 +78,24 @@ def Ic_tape(b: float, theta: float) -> float:
     )
 
 
-def Je_tape(b: float, theta: float,
-            ri: float = None, rf: float = None,
-            l: float = solenoid_length,
-            sigma_limit_pa: float = 500e6,
-            stress_derating: float = 0.80) -> Tuple[float, float]:
+def Je_tape(b: float, theta: float) -> float:
     """
     Engineering current density [A/mm²] at field b and angle theta,
-    derated by margin factor. If solenoid geometry is provided and the
-    resulting hoop stress exceeds sigma_limit_pa, an additional
-    stress_derating factor is applied to je_max.
+    derated by 90% fill factor.
 
     Parameters
-    ----------
-    b               : field magnitude [T]
-    theta           : field angle [rad] w.r.t. c-axis
-    ri              : inner radius [m]  (optional, needed for stress check)
-    rf              : outer radius [m]  (optional, needed for stress check)
-    l               : solenoid length [m]
-    sigma_limit_pa  : hoop stress threshold [Pa]  (default 500 MPa)
-    stress_derating : additional derating factor applied when stress
-                      exceeds the limit (default 0.80, i.e. 20% reduction)
+    ----------i want a table
+    b     : field magnitude [T]
+    theta : field angle [rad] w.r.t. c-axis
 
     Returns
     -------
-    jc_tape_mm2 : critical current density over full tape cross-section [A/mm²]
-    je_max      : derated engineering Je [A/mm²]
+    je : engineering current density [A/mm²]
     """
-    ic          = Ic_tape(b, theta)
-    ic_w        = ic / w_tape_mm                          # [A/mm]
-    jc_tape_mm2 = ic_w / t_tape_mm * Bernardo_margin_Jc  # [A/mm²]
-    je_max      = jc_tape_mm2 * (1 - margin)             # base derated Je
-
-    # ── Stress check (only when geometry is supplied) ──────────────────────
-    if ri is not None and rf is not None:
-        # Convert je_max from [A/mm²] to [A/m²] for hoop_stress()
-        j_si = je_max * 1e6
-        sigma, _ = hoop_stress(ri, rf, j_si, l)
-
-        if sigma > sigma_limit_pa:
-            je_max *= stress_derating   # apply additional reduction
+    ic          = Ic_tape(b, theta)          # [A]      for tape of width w_tape_mm
+    ic_w        = ic / w_tape_mm             # [A/mm]   per mm of tape width
+    jc_tape_mm2 = ic_w / t_tape_mm*Bernardo_margin_Jc           # [A/mm²]  over full tape cross-section
+    je_max       = jc_tape_mm2 * (1 - margin)   # [A/mm²]  90% derated engineering Je
 
     return jc_tape_mm2, je_max
 
