@@ -30,10 +30,11 @@ je_nominal      = 630e6    # [A/m²]  tape engineering Je (630 A/mm²)
 t_tape_mm = 0.1     # Total tape thickness [mm]
 t_sc_mm   = 0.002   # SC layer thickness   [mm]  (2 µm)
 w_tape_mm = 4.0     # Tape width           [mm]
-#margin      = 0.40     # [—]      derating factor applied to Je_crit
-margin      = 0.90     # [—]      derating factor applied to Je_crit
-#Bernardo_margin_Jc = 0.70
-Bernardo_margin_Jc = 1
+
+Cu = 0.5                 # [—]      copper fraction of the tape cross-section 
+Cu_SC_ratio = 1 /(1-Cu)  # [—]      ratio of total tape cross-section to SC layer cross-section  (1 + r) = (1 + Cu/SC)= 1 / (1 - Cu)
+
+margin      = 0.5     # [—]      margin applied to obtain the operating current density Je_op from the engineering current density Je
 # ─────────────────────────────────────────────────────────────────────────────
 # Field angle
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,8 +95,8 @@ def Je_tape(b: float, theta: float) -> float:
     """
     ic          = Ic_tape(b, theta)          # [A]      for tape of width w_tape_mm
     ic_w        = ic / w_tape_mm             # [A/mm]   per mm of tape width
-    jc_tape_mm2 = ic_w / t_tape_mm*Bernardo_margin_Jc           # [A/mm²]  over full tape cross-section
-    je_max       = jc_tape_mm2 * (1 - margin)   # [A/mm²]  90% derated engineering Je
+    jc_tape_mm2 = ic_w / t_tape_mm/Cu_SC_ratio           # [A/mm²]  over full tape cross-section
+    je_max       = jc_tape_mm2 * (margin)   # [A/mm²]  90% derated engineering Je
 
     return jc_tape_mm2, je_max
 
@@ -106,16 +107,12 @@ def je_max_stress_limited(ri: float, rf: float,
     Maximum engineering current density [A/m²] such that the hoop stress
     does not exceed sigma_limit [Pa].
 
-    Derived by direct inversion of:
+    Since B0 ∝ Je  and  σ = (B0² / 2μ0) * (ri / th),
+    we have σ ∝ Je², so:
 
-        sigma = (B0² / 2µ0) * (ri / th)
+        Je_max_mech = Je_ref * sqrt(sigma_limit / sigma_ref)
 
-    with B0 = solenoid_field_center(ri, rf, 1.0, l) * Je  (linear in Je), giving:
-
-        G      = (B0_unit² / 2µ0) * (ri / th)    [Pa / (A/m²)²]
-        Je_lim = sqrt(sigma_limit / G)             [A/m²]
-
-    where B0_unit is the field produced by unit current density (Je = 1 A/m²).
+    solved via a single reference evaluation.
 
     Parameters
     ----------
@@ -128,12 +125,14 @@ def je_max_stress_limited(ri: float, rf: float,
     -------
     je_lim : stress-limited Je [A/m²]
     """
-    th      = rf - ri
-    b0_unit = solenoid_field_center(ri, rf, 1.0, l)   # [T] per (A/m²) of Je
-    G       = (b0_unit**2 / (2.0 * mu0)) * (ri / th)  # [Pa / (A/m²)²]
-    je_lim  = np.sqrt(sigma_limit / G)                 # [A/m²]
+    # Use a reference Je to get the stress scaling
+    je_ref    = 1e8          # [A/m²]  arbitrary reference (100 A/mm²)
+    sigma_ref, _ = hoop_stress(ri, rf, je_ref, l)
 
-    return je_lim
+    # σ ∝ Je²  →  Je_lim = Je_ref * sqrt(sigma_limit / sigma_ref)
+    je_lim = je_ref * np.sqrt(sigma_limit / sigma_ref)
+
+    return je_lim   # [A/m²]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2.  Solenoid field
