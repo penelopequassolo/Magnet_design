@@ -19,7 +19,7 @@ def _save(fig, name):
 
 def _setup_area_axes(ax):
     ax.set_xlabel("Inner radius  Ri  (mm)", fontsize=12)
-    ax.set_ylabel("Conductor cross-section  A = π(Ro² − Ri²)  (mm²)", fontsize=12)
+    ax.set_ylabel("Superconductor cross-section  A_SC  (mm²)", fontsize=12)
     ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
     ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
     ax.set_ylim(0, config.A_MAX * 1e6)

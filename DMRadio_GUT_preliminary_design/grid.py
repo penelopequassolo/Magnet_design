@@ -6,14 +6,7 @@
 import numpy as np
 
 import config
-from solenoid_lib import (
-    solenoid_length,
-    theta_solenoid,
-    solenoid_field_center,
-    Je_tape,
-    je_max_stress_limited,
-    hoop_stress,
-)
+import solenoid_lib
 
 
 def _empty_result_grids(shape):
@@ -49,8 +42,8 @@ def _solve_cell(ri, rf, v, je_mech_mm2=None):
     converged = False
     for _ in range(config.MAX_ITER):
         je_si = je_mm2 * 1e6
-        b0 = solenoid_field_center(ri, rf, je_si, solenoid_length)
-        _, je_em_mm2 = Je_tape(b0, theta_solenoid)
+        b0 = solenoid_lib.solenoid_field_center(ri, rf, je_si, solenoid_lib.solenoid_length)
+        _, je_em_mm2 = solenoid_lib.Je_tape(b0, solenoid_lib.theta_solenoid)
 
         je_new_mm2 = je_em_mm2 if je_mech_mm2 is None else min(je_em_mm2, je_mech_mm2)
 
@@ -62,9 +55,9 @@ def _solve_cell(ri, rf, v, je_mech_mm2=None):
 
     # ── Final quantities at converged Je ─────────────────────────────────────
     je_si = je_mm2 * 1e6
-    b0 = solenoid_field_center(ri, rf, je_si, solenoid_length)
-    sigma_pa, _ = hoop_stress(ri, rf, je_si, solenoid_length)
-    j_crit_mm2, je_em_mm2 = Je_tape(b0, theta_solenoid)
+    b0 = solenoid_lib.solenoid_field_center(ri, rf, je_si, solenoid_lib.solenoid_length)
+    sigma_pa, _ = solenoid_lib.hoop_stress(ri, rf, je_si, solenoid_lib.solenoid_length)
+    j_crit_mm2, je_em_mm2 = solenoid_lib.Je_tape(b0, solenoid_lib.theta_solenoid)
     load_ratio = j_crit_mm2 / je_mm2
 
     return {
@@ -88,7 +81,7 @@ def build_thickness_grid():
 
     ri, th = np.meshgrid(ri_vals, th_vals)
     rf = ri + th
-    v  = np.pi * ri**2 * solenoid_length
+    v  = np.pi * ri**2 * solenoid_lib.solenoid_length
 
     res = _empty_result_grids((config.N_TH, config.N_RI))
     total = config.N_RI * config.N_TH
@@ -97,8 +90,8 @@ def build_thickness_grid():
     for i in range(config.N_TH):
         for j in range(config.N_RI):
             try:
-                je_mech_si = je_max_stress_limited(
-                    ri[i, j], rf[i, j], solenoid_length, config.SIGMA_LIMIT_PA
+                je_mech_si = solenoid_lib.je_max_stress_limited(
+                    ri[i, j], rf[i, j], solenoid_lib.solenoid_length, config.SIGMA_LIMIT_PA
                 )
                 cell = _solve_cell(ri[i, j], rf[i, j], v[i, j],
                                    je_mech_mm2=je_mech_si / 1e6)
@@ -121,17 +114,23 @@ def build_thickness_grid():
 # ─────────────────────────────────────────────────────────────────────────────
 def build_area_grid():
     ri_vals = np.linspace(config.RI_MIN, config.RI_MAX, config.N_RI_A)
-    a_vals  = np.linspace(config.A_MIN, config.A_MAX, config.N_A)
+    a_vals  = np.linspace(config.A_MIN, config.A_MAX, config.N_A)   # SC-layer area
 
-    ri, a = np.meshgrid(ri_vals, a_vals)
-    # A = pi((Ri+Th)^2 - Ri^2)  ->  Th = sqrt(Ri^2 + A/pi) - Ri
-    th = np.sqrt(ri**2 + a / np.pi) - ri
+    ri, a_sc = np.meshgrid(ri_vals, a_vals)
+
+    # Scan axis is the superconductor cross-section; convert to total tape area
+    # because the winding physically occupies the full conductor cross-section.
+    a_total = a_sc * solenoid_lib.Cu_SC_ratio
+
+    # A_total = pi((Ri+Th)^2 - Ri^2)  ->  Th = sqrt(Ri^2 + A_total/pi) - Ri
+    th = np.sqrt(ri**2 + a_total / np.pi) - ri
     rf = ri + th
-    v  = np.pi * ri**2 * solenoid_length
+    v  = np.pi * ri**2 * solenoid_lib.solenoid_length
 
     res = _empty_result_grids((config.N_A, config.N_RI_A))
     total = config.N_RI_A * config.N_A
     done = 0
+
 
     for i in range(config.N_A):
         for j in range(config.N_RI_A):
@@ -143,8 +142,11 @@ def build_area_grid():
                 done += 1
                 continue
             try:
-                # NOTE: original A-scan used no mechanical cap in the loop.
-                cell = _solve_cell(ri[i, j], rf[i, j], v[i, j], je_mech_mm2=None)
+                je_mech_si = solenoid_lib.je_max_stress_limited(
+                    ri[i, j], rf[i, j], solenoid_lib.solenoid_length, config.SIGMA_LIMIT_PA
+                )
+                cell = _solve_cell(ri[i, j], rf[i, j], v[i, j],
+                                   je_mech_mm2=je_mech_si / 1e6)
                 for key, val in cell.items():
                     res[key][i, j] = val
             except (ValueError, RuntimeError):
@@ -152,10 +154,16 @@ def build_area_grid():
             done += 1
         print(f"  {done}/{total}  ({100 * done / total:.0f}%)", end="\r")
 
+
+
+
     print("\n2-D meshgrid (A-scan) computed.")
-    grids = {"ri": ri, "a": a, "th": th, "rf": rf, "v": v, **res}
+    grids = {"ri": ri, "a": a_sc, "a_total": a_total,
+             "th": th, "rf": rf, "v": v, **res}
     _print_summary(grids, total, label="A",
-                   extra={"A (mm²)": a * 1e6, "Th (derived)": th * 1e3})
+                   extra={"A_SC (mm²)": a_sc * 1e6,
+                          "A_total (mm²)": a_total * 1e6,
+                          "Th (derived)": th * 1e3})
     return grids
 
 

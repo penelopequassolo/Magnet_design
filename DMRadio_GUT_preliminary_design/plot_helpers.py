@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.ticker as ticker
 
 import config
+import solenoid_lib
 
 
 def style_axes(ax):
@@ -72,16 +73,14 @@ def make_contour_plot(fig, ax, x_data, y_data, z, levels, cmap,
 
 
 def title_suffix_th():
-    from solenoid_lib import solenoid_length, margin
-    return (f"L = {solenoid_length*1e3:.0f} mm (fixed)  |  "
+    return (f"L = {solenoid_lib.solenoid_length*1e3:.0f} mm (fixed)  |  "
             f"Je = self-consistent (scaling law)  |  "
-            f"margin = {margin*100:.0f}%  |  "
+            f"margin = {solenoid_lib.margin*100:.0f}%  |  "
             f"Ri : 10 → 1000 mm  |  Th : 10 → 100 mm")
 
 
 def title_suffix_area():
-    from solenoid_lib import solenoid_length, margin
-    return (f"L = {solenoid_length*1e3:.0f} mm (fixed)  |  "
+    return (f"L = {solenoid_lib.solenoid_length*1e3:.0f} mm (fixed)  |  "
             f"Je = self-consistent (scaling law)  |  "
-            f"margin = {margin*100:.0f}%  |  "
+            f"margin = {solenoid_lib.margin*100:.0f}%  |  "
             f"Ri : 10 → 1000 mm  |  A : 0 → 700000 mm²")

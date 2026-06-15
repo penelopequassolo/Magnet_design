@@ -31,10 +31,10 @@ t_tape_mm = 0.1     # Total tape thickness [mm]
 t_sc_mm   = 0.002   # SC layer thickness   [mm]  (2 µm)
 w_tape_mm = 4.0     # Tape width           [mm]
 
-Cu = 0.5                 # [—]      copper fraction of the tape cross-section 
+Cu = 0.8                 # [—]      copper fraction of the tape cross-section 
 Cu_SC_ratio = 1 /(1-Cu)  # [—]      ratio of total tape cross-section to SC layer cross-section  (1 + r) = (1 + Cu/SC)= 1 / (1 - Cu)
 
-margin      = 0.5     # [—]      margin applied to obtain the operating current density Je_op from the engineering current density Je
+margin      = 0.4     # [—]      margin applied to obtain the operating current density Je_op from the engineering current density Je
 # ─────────────────────────────────────────────────────────────────────────────
 # Field angle
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ def Je_tape(b: float, theta: float) -> float:
     ic          = Ic_tape(b, theta)          # [A]      for tape of width w_tape_mm
     ic_w        = ic / w_tape_mm             # [A/mm]   per mm of tape width
     jc_tape_mm2 = ic_w / t_tape_mm/Cu_SC_ratio           # [A/mm²]  over full tape cross-section
-    je_max       = jc_tape_mm2 * (margin)   # [A/mm²]  90% derated engineering Je
+    je_max       = jc_tape_mm2 * (margin)   # [A/mm²]  derated by margin to get operating Je
 
     return jc_tape_mm2, je_max
 
