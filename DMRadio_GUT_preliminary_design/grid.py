@@ -126,6 +126,8 @@ def build_area_grid():
     th = np.sqrt(ri**2 + a_total / np.pi) - ri
     rf = ri + th
     v  = np.pi * ri**2 * solenoid_lib.solenoid_length
+    
+    rebco_total_length = np.pi * (rf**2-ri**2) * solenoid_lib.solenoid_length/(solenoid_lib.t_tape_mm*1e-3*solenoid_lib.w_tape_mm*1e-3)
 
     res = _empty_result_grids((config.N_A, config.N_RI_A))
     total = config.N_RI_A * config.N_A
@@ -158,7 +160,7 @@ def build_area_grid():
 
 
     print("\n2-D meshgrid (A-scan) computed.")
-    grids = {"ri": ri, "a": a_total, "a_sc": a_sc,
+    grids = {"ri": ri, "a": a_total, "a_sc": a_sc, "rebco_total_length": rebco_total_length,
              "th": th, "rf": rf, "v": v, **res}
     _print_summary(grids, total, label="A",
                    extra={"A_total (mm²)": a_total * 1e6,

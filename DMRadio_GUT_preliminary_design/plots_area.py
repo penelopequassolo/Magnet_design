@@ -18,12 +18,12 @@ def _save(fig, name):
     plt.show()
 
 
-def _setup_area_axes(ax):
+def _setup_area_axes(ax, y):
     ax.set_xlabel("Inner radius  Ri  (mm)", fontsize=12)
-    ax.set_ylabel("Superconductor cross-section  A_SC  (mm²)", fontsize=12)
+    ax.set_ylabel("Superconductor total length  L_SC  (m)", fontsize=12)
     ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
     ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-    ax.set_ylim(0, config.A_MAX/ solenoid_lib.Cu_SC_ratio  * 1e6)
+    ax.set_ylim(0, np.nanmax(y))
 
 
 def _draw_background_stress(fig, ax, x, y, stress):
@@ -70,7 +70,7 @@ def _draw_thickness_iso(ax, x, y, th_grid):
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_all(grids):
     x = grids["ri"] * 1e3                              # mm
-    y = grids["a_sc"] * 1e6                            # mm²  (SC cross-section)
+    y = grids["rebco_total_length"]                           # m (SC total length)
     suffix = ph.title_suffix_area()
 
     plot_combined_scan_log(grids, x, y, suffix)
