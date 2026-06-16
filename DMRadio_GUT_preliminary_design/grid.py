@@ -114,13 +114,13 @@ def build_thickness_grid():
 # ─────────────────────────────────────────────────────────────────────────────
 def build_area_grid():
     ri_vals = np.linspace(config.RI_MIN, config.RI_MAX, config.N_RI_A)
-    a_vals  = np.linspace(config.A_MIN, config.A_MAX, config.N_A)   # SC-layer area
+    a_vals  = np.linspace(config.A_MIN, config.A_MAX, config.N_A)   # total conductor area
 
-    ri, a_sc = np.meshgrid(ri_vals, a_vals)
+    ri, a_total = np.meshgrid(ri_vals, a_vals)
 
-    # Scan axis is the superconductor cross-section; convert to total tape area
-    # because the winding physically occupies the full conductor cross-section.
-    a_total = a_sc * solenoid_lib.Cu_SC_ratio
+    # Scan axis is the TOTAL conductor cross-section. The SC-layer area is the
+    # non-copper fraction of the tape.
+    a_sc = a_total / solenoid_lib.Cu_SC_ratio        # = a_total * (1 - Cu)
 
     # A_total = pi((Ri+Th)^2 - Ri^2)  ->  Th = sqrt(Ri^2 + A_total/pi) - Ri
     th = np.sqrt(ri**2 + a_total / np.pi) - ri
@@ -158,13 +158,14 @@ def build_area_grid():
 
 
     print("\n2-D meshgrid (A-scan) computed.")
-    grids = {"ri": ri, "a": a_sc, "a_total": a_total,
+    grids = {"ri": ri, "a": a_total, "a_sc": a_sc,
              "th": th, "rf": rf, "v": v, **res}
     _print_summary(grids, total, label="A",
-                   extra={"A_SC (mm²)": a_sc * 1e6,
-                          "A_total (mm²)": a_total * 1e6,
+                   extra={"A_total (mm²)": a_total * 1e6,
+                          "A_SC (mm²)": a_sc * 1e6,
                           "Th (derived)": th * 1e3})
     return grids
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
