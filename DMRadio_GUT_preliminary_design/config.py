@@ -22,7 +22,8 @@ TH_MIN, TH_MAX = 0.002, 0.400   # m   (1 mm  →  400 mm)
 # ── Grid: Ri vs A (conductor cross-section) ──────────────────────────────────
 N_RI_A = 60
 N_A    = 60
-A_MIN = np.pi * ((RI_MAX + TH_MIN)**2 - RI_MAX**2)   # m²  smallest Th, largest Ri
+#A_MIN = np.pi * ((RI_MAX + TH_MIN)**2 - RI_MAX**2)   # m²  smallest Th, largest Ri
+A_MIN = 1e-6                    # m²  absolute minimum to avoid singularities
 A_MAX = np.pi * ((RI_MIN + TH_MAX)**2 - RI_MIN**2)   # m²  largest Th, smallest Ri
 TH_MAX_LIMIT = None             # m   max coil thickness mask (None disables)
 
