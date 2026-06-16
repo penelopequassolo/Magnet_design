@@ -17,13 +17,13 @@ def _save(fig, name):
     fig.savefig(name, dpi=config.SAVE_DPI, bbox_inches="tight")
     plt.show()
 
-
-def _setup_area_axes(ax, y):
+def _setup_area_axes(ax, grids):
+    y = grids["rebco_total_length"]
     ax.set_xlabel("Inner radius  Ri  (mm)", fontsize=12)
-    ax.set_ylabel("Superconductor total length  L_SC  (m)", fontsize=12)
+    ax.set_ylabel("Superconductor total length  L_SC  (km)", fontsize=12)
     ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
     ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-    ax.set_ylim(0, np.nanmax(y))
+    ax.set_ylim(np.nanmin(y)/10**3, np.nanmax(y)/10**3)
 
 
 def _draw_background_stress(fig, ax, x, y, stress):
@@ -70,14 +70,14 @@ def _draw_thickness_iso(ax, x, y, th_grid):
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_all(grids):
     x = grids["ri"] * 1e3                              # mm
-    y = grids["rebco_total_length"]                           # m (SC total length)
+    y = grids["rebco_total_length"]/1e3                           # m (SC total length)
     suffix = ph.title_suffix_area()
 
     plot_combined_scan_log(grids, x, y, suffix)
     plot_combined_b2v(grids, x, y, suffix)
 
 
-def _finish(ax, suffix, title_metric, legend_metric_label, legend_metric_color):
+def _finish(ax, grids, suffix, title_metric, legend_metric_label, legend_metric_color):
     handles = [
         Line2D([0], [0], color="black",       lw=1.8, ls="-",  label="B₀  (T)"),
         Line2D([0], [0], color=legend_metric_color, lw=1.2, ls="--",
@@ -89,7 +89,8 @@ def _finish(ax, suffix, title_metric, legend_metric_label, legend_metric_color):
               framealpha=0.85, edgecolor="grey")
     ax.set_title(f"Combined map — B₀ / {title_metric} / Hoop stress  "
                  f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
-    _setup_area_axes(ax)
+    _setup_area_axes(ax, grids)
+
     ph.style_axes_grid(ax)
 
 
@@ -110,7 +111,7 @@ def plot_combined_scan_log(grids, x, y, suffix):
 
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
-    _finish(ax, suffix, "Scan rate", "Scan rate  (log₁₀)", "steelblue")
+    _finish(ax, grids, suffix, "Scan rate", "Scan rate  (log₁₀)", "steelblue")
     _save(fig, "contour_combined_Ascan_sc.png")
 
 
@@ -133,5 +134,5 @@ def plot_combined_b2v(grids, x, y, suffix):
 
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
-    _finish(ax, suffix, "B²V", "B²V  (T²·m³)", "steelblue")
+    _finish(ax, grids, suffix, "B²V", "B²V  (T²·m³)", "steelblue")
     _save(fig, "contour_combined_Ascan_b2v.png")

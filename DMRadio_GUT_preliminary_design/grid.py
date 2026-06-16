@@ -127,7 +127,7 @@ def build_area_grid():
     rf = ri + th
     v  = np.pi * ri**2 * solenoid_lib.solenoid_length
     
-    rebco_total_length = np.pi * (rf**2-ri**2) * solenoid_lib.solenoid_length/(solenoid_lib.t_tape_mm*1e-3*solenoid_lib.w_tape_mm*1e-3)
+    rebco_total_length = a_sc * solenoid_lib.solenoid_length/(solenoid_lib.t_tape_mm*1e-3*solenoid_lib.w_tape_mm*1e-3)
 
     res = _empty_result_grids((config.N_A, config.N_RI_A))
     total = config.N_RI_A * config.N_A

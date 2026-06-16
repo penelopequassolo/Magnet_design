@@ -2,6 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # All tunable parameters and shared constants live here.
 # ─────────────────────────────────────────────────────────────────────────────
+import numpy as np
 
 # ── Self-consistent solver ───────────────────────────────────────────────────
 MAX_ITER = 50        # [—]      max self-consistent iterations per cell
@@ -16,12 +17,13 @@ STRESS_DERATING = 0.80    # [—]   derating factor when stress exceeds limit
 N_RI = 60
 N_TH = 60
 RI_MIN, RI_MAX = 0.010, 1.000   # m   (10 mm  → 1000 mm)
-TH_MIN, TH_MAX = 0.010, 0.200   # m   (10 mm  →  200 mm)
+TH_MIN, TH_MAX = 0.002, 0.400   # m   (1 mm  →  400 mm)
 
 # ── Grid: Ri vs A (conductor cross-section) ──────────────────────────────────
 N_RI_A = 60
 N_A    = 60
-A_MIN, A_MAX = 1e-4, 0.7        # m²  (~0 → 700000 mm²)
+A_MIN = np.pi * ((RI_MAX + TH_MIN)**2 - RI_MAX**2)   # m²  smallest Th, largest Ri
+A_MAX = np.pi * ((RI_MIN + TH_MAX)**2 - RI_MIN**2)   # m²  largest Th, smallest Ri
 TH_MAX_LIMIT = None             # m   max coil thickness mask (None disables)
 
 # ── Plotting ─────────────────────────────────────────────────────────────────
