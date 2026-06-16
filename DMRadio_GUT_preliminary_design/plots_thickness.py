@@ -21,11 +21,11 @@ def plot_all(grids):
     y = grids["th"] * 1e3   # mm
     suffix = ph.title_suffix_th()
 
-    _plot_b0(grids, x, y, suffix)
-    _plot_je(grids, x, y, suffix)
-    _plot_scan(grids, x, y, suffix)
-    _plot_stress(grids, x, y, suffix)
-    _plot_jc(grids, x, y, suffix)
+    #_plot_b0(grids, x, y, suffix)
+    #_plot_je(grids, x, y, suffix)
+    #_plot_scan(grids, x, y, suffix)
+    #_plot_stress(grids, x, y, suffix)
+    #_plot_jc(grids, x, y, suffix)
     plot_combined(grids, x, y, suffix)
 
 

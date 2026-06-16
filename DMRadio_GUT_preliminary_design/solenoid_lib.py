@@ -34,7 +34,7 @@ w_tape_mm = 4.0     # Tape width           [mm]
 Cu = 0.8                 # [—]      copper fraction of the tape cross-section 
 Cu_SC_ratio = 1 /(1-Cu)  # [—]      ratio of total tape cross-section to SC layer cross-section  (1 + r) = (1 + Cu/SC)= 1 / (1 - Cu)
 
-margin      = 0.4     # [—]      margin applied to obtain the operating current density Je_op from the engineering current density Je
+margin      = 0.5     # [—]      margin applied to obtain the operating current density Je_op from the engineering current density Je
 # ─────────────────────────────────────────────────────────────────────────────
 # Field angle
 # ─────────────────────────────────────────────────────────────────────────────

@@ -3,10 +3,17 @@
 # Build meshgrids and run the self-consistent EM + mechanical solver.
 # Returns a dict of result grids that downstream plotting modules consume.
 # ─────────────────────────────────────────────────────────────────────────────
+import importlib
+
 import numpy as np
 
-import config
+
+
 import solenoid_lib
+importlib.reload(solenoid_lib)
+
+import config
+importlib.reload(config)
 
 
 def _empty_result_grids(shape):
@@ -120,14 +127,14 @@ def build_area_grid():
 
     # Scan axis is the TOTAL conductor cross-section. The SC-layer area is the
     # non-copper fraction of the tape.
-    a_sc = a_total / solenoid_lib.Cu_SC_ratio        # = a_total * (1 - Cu)
+    a_sc = a_total * (1 - solenoid_lib.Cu)        # = a_total * (1 - Cu)
 
     # A_total = pi((Ri+Th)^2 - Ri^2)  ->  Th = sqrt(Ri^2 + A_total/pi) - Ri
     th = np.sqrt(ri**2 + a_total / np.pi) - ri
     rf = ri + th
     v  = np.pi * ri**2 * solenoid_lib.solenoid_length
     
-    rebco_total_length = a_sc * solenoid_lib.solenoid_length/(solenoid_lib.t_tape_mm*1e-3*solenoid_lib.w_tape_mm*1e-3)
+    rebco_total_length = a_sc * solenoid_lib.solenoid_length/(solenoid_lib.t_tape_mm*1e-3*solenoid_lib.w_tape_mm*1e-3)*1e-3
 
     res = _empty_result_grids((config.N_A, config.N_RI_A))
     total = config.N_RI_A * config.N_A
@@ -138,6 +145,9 @@ def build_area_grid():
         for j in range(config.N_RI_A):
             th_ij = th[i, j]
             if not np.isfinite(th_ij) or th_ij <= 0.0:
+                done += 1
+                continue
+            if th_ij < config.TH_MIN:          
                 done += 1
                 continue
             if config.TH_MAX_LIMIT is not None and th_ij > config.TH_MAX_LIMIT:

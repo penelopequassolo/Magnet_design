@@ -20,10 +20,10 @@ def _save(fig, name):
 def _setup_area_axes(ax, grids):
     y = grids["rebco_total_length"]
     ax.set_xlabel("Inner radius  Ri  (mm)", fontsize=12)
-    ax.set_ylabel("Superconductor total length  L_SC  (km)", fontsize=12)
+    ax.set_ylabel("REBCO total length  L_SC  (km)", fontsize=12)
     ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
     ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
-    ax.set_ylim(np.nanmin(y)/10**3, np.nanmax(y)/10**3)
+    ax.set_ylim(np.nanmin(y), np.nanmax(y))
 
 
 def _draw_background_stress(fig, ax, x, y, stress):
@@ -56,7 +56,7 @@ def _draw_b0_iso(ax, x, y, b0):
 
 
 def _draw_thickness_iso(ax, x, y, th_grid):
-    th_iso_mm = [10, 25, 50, 75, 100, 125, 150]
+    th_iso_mm = [10, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500]   # mm
     th_data = th_grid * 1e3
     plot = [lv for lv in th_iso_mm
             if np.nanmin(th_data) <= lv <= np.nanmax(th_data)]
@@ -70,7 +70,7 @@ def _draw_thickness_iso(ax, x, y, th_grid):
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_all(grids):
     x = grids["ri"] * 1e3                              # mm
-    y = grids["rebco_total_length"]/1e3                           # m (SC total length)
+    y = grids["rebco_total_length"]                          # m (SC total length)
     suffix = ph.title_suffix_area()
 
     plot_combined_scan_log(grids, x, y, suffix)
