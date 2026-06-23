@@ -15,7 +15,6 @@ importlib.reload(solenoid_lib)
 import config
 importlib.reload(config)
 
-from solenoid_lib import scan_time
 
 def _empty_result_grids(shape):
     """Create the standard set of NaN-initialised output grids."""
@@ -70,7 +69,6 @@ def _solve_cell(ri, rf, v, je_mech_mm2=None):
 
     return {
         "b0":        b0,
-        #"scan":      scan_time(B0=b0, V=v),
         "scan":      (b0**2 * v**(5 / 3))**2,
         "stress":    sigma_pa / 1e6,
         "j_crit":    j_crit_mm2,

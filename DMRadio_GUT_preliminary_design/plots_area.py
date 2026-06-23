@@ -37,6 +37,26 @@ def _draw_background_stress(fig, ax, x, y, stress):
     cbar.ax.tick_params(labelsize=9, direction="in")
 
 
+def _draw_background_scanlog(fig, ax, x, y, scan):
+    scan_log = np.log10(np.where(scan > 0, scan, np.nan))
+    lvl = ph.safe_levels(np.nanmin(scan_log), np.nanmax(scan_log), n=30)
+    cf = ax.contourf(x, y, scan_log, levels=lvl, cmap="viridis", alpha=0.8)
+    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                        pad=0.02, aspect=40, shrink=0.95)
+    cbar.set_label("Scan rate  (log₁₀)", fontsize=10, labelpad=4)
+    cbar.ax.tick_params(labelsize=9, direction="in")
+    return scan_log
+
+
+def _draw_background_b2v(fig, ax, x, y, b2v):
+    lvl = ph.safe_levels(np.nanmin(b2v), np.nanmax(b2v), n=30)
+    cf = ax.contourf(x, y, b2v, levels=lvl, cmap="viridis", alpha=0.8)
+    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                        pad=0.02, aspect=40, shrink=0.95)
+    cbar.set_label("B²V  (T²·m³)", fontsize=10, labelpad=4)
+    cbar.ax.tick_params(labelsize=9, direction="in")
+
+
 def _draw_stress_iso(ax, x, y, stress):
     lvls = [lv for lv in config.STRESS_ISO_LEVELS
             if np.nanmin(stress) <= lv <= np.nanmax(stress)]
@@ -68,20 +88,11 @@ def _draw_thickness_iso(ax, x, y, th_grid):
         ax.clabel(cs, fmt=lambda v: f"Th={v:.0f} mm", fontsize=7,
                   inline=True, inline_spacing=4, colors="dimgrey")
 
-def _draw_background_scanlog(fig, ax, x, y, scan):
-    scan_log = np.log10(np.where(scan > 0, scan, np.nan))
-    lvl = ph.safe_levels(np.nanmin(scan_log), np.nanmax(scan_log), n=30)
-    cf = ax.contourf(x, y, scan_log, levels=lvl, cmap="viridis", alpha=0.8)
-    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
-                        pad=0.02, aspect=40, shrink=0.95)
-    cbar.set_label("Scan rate  (log₁₀)", fontsize=10, labelpad=4)
-    cbar.ax.tick_params(labelsize=9, direction="in")
-    return scan_log
 
 # ─────────────────────────────────────────────────────────────────────────────
 def plot_all(grids):
-    x = grids["ri"] * 1e3                              # mm
-    y = grids["rebco_total_length"]                          # m (SC total length)
+    x = grids["ri"] * 1e3                          # mm
+    y = grids["rebco_total_length"]                # m (SC total length)
     suffix = ph.title_suffix_area()
 
     plot_combined_scan_log(grids, x, y, suffix)
@@ -92,18 +103,16 @@ def plot_all(grids):
 
 def _finish(ax, grids, suffix, title_metric, legend_metric_label, legend_metric_color):
     handles = [
-        Line2D([0], [0], color="black",       lw=1.8, ls="-",  label="B₀  (T)"),
-        Line2D([0], [0], color=legend_metric_color, lw=1.2, ls="--",
-               label=legend_metric_label),
-        Line2D([0], [0], color="crimson", lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
-        Line2D([0], [0], color="dimgrey",     lw=0.8, ls=":",  label="Thickness  (mm)"),
+        Line2D([0], [0], color="black",                lw=1.8, ls="-",  label="B₀  (T)"),
+        Line2D([0], [0], color=legend_metric_color,    lw=1.2, ls="--", label=legend_metric_label),
+        Line2D([0], [0], color="crimson",              lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
+        Line2D([0], [0], color="dimgrey",              lw=0.8, ls=":",  label="Thickness  (mm)"),
     ]
     ax.legend(handles=handles, fontsize=10, loc="upper left",
               framealpha=0.85, edgecolor="grey")
     ax.set_title(f"Combined map — B₀ / {title_metric} / Hoop stress  "
                  f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
     _setup_area_axes(ax, grids)
-
     ph.style_axes_grid(ax)
 
 
@@ -125,7 +134,7 @@ def plot_combined_scan_log(grids, x, y, suffix):
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
     _finish(ax, grids, suffix, "Scan rate", "Scan rate  (log₁₀)", "steelblue")
-    _save(fig, "contour_combined_Ascan_sc.png")
+    _save(fig, "contour_combined_Ascan_sc_stress_bg.png")
 
 
 def plot_combined_b2v(grids, x, y, suffix):
@@ -133,7 +142,7 @@ def plot_combined_b2v(grids, x, y, suffix):
     _draw_background_stress(fig, ax, x, y, grids["stress"])
     _draw_stress_iso(ax, x, y, grids["stress"])
 
-    b2v = grids["b0"]**2 * grids["v"]   # T²·m³  (bore volume)
+    b2v = grids["b0"]**2 * grids["v"]
     b2v = np.where(np.isfinite(b2v) & (b2v > 0), b2v, np.nan)
     if np.isfinite(b2v).any():
         bv_min, bv_max = np.nanmin(b2v), np.nanmax(b2v)
@@ -148,7 +157,7 @@ def plot_combined_b2v(grids, x, y, suffix):
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
     _finish(ax, grids, suffix, "B²V", "B²V  (T²·m³)", "steelblue")
-    _save(fig, "contour_combined_Ascan_b2v.png")
+    _save(fig, "contour_combined_Ascan_b2v_stress_bg.png")
 
 
 def plot_combined_scan_log_contour(grids, x, y, suffix):
@@ -168,7 +177,7 @@ def plot_combined_scan_log_contour(grids, x, y, suffix):
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
     _finish(ax, grids, suffix, "Scan rate", "Scan rate  (log₁₀)", "steelblue")
-    _save(fig, "contour_combined_Ascan_sc.png")
+    _save(fig, "contour_combined_Ascan_sc_filled.png")
 
 
 def plot_combined_b2v_contour(grids, x, y, suffix):
@@ -192,4 +201,4 @@ def plot_combined_b2v_contour(grids, x, y, suffix):
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
     _finish(ax, grids, suffix, "B²V", "B²V  (T²·m³)", "steelblue")
-    _save(fig, "contour_combined_Ascan_b2v.png")
+    _save(fig, "contour_combined_Ascan_b2v_filled.png")
