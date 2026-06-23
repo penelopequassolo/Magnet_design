@@ -282,7 +282,6 @@ def hoop_stress(ri: float, rf: float,
 
     return sigma, b0
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # solenoid_summary
 # ─────────────────────────────────────────────────────────────────────────────
@@ -332,3 +331,76 @@ def solenoid_summary(ri: float, rf: float,
         "je_op"          : je_op,            # [A/mm²] engineering Je at b0
         "theta"          : theta,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# scan time
+# ─────────────────────────────────────────────────────────────────────────────
+
+from astropy import constants
+import numpy as np
+from scipy import integrate
+
+KSVZ = 1.92
+DFSZ = 0.75
+
+def g_x(C_ag, m_a):
+    """Returns g_ayy in GeV^-1, with m_a in eV."""
+    return 2e-10 * C_ag * m_a
+
+def scan_time(B0, V,
+              model    = 'KSVZ',
+              SNR      = 3,
+              c_PU     = 0.1,
+              Q        = 20e6,
+              eta_A_dB = -20,
+              T        = 10e-3,
+              rho_DM   = 0.45):
+    """
+    Compute the total scan time for DMRadio-GUT (0.1-30 MHz band),
+    following Eq. (3) of Brouwer et al. (2022).
+
+    Parameters
+    ----------
+    B0 : float – Peak magnetic field [T]
+    V  : float – Pickup volume [m^3]
+
+    Returns
+    -------
+    scan_time_yr : float – Total scan time [years]
+    """
+
+    # Fixed frequency band from the paper (0.1 - 30 MHz)
+    nu_arr = np.linspace(0.1e6, 30e6, 1_000)         # [Hz]
+
+    # Model selection
+    C_ag = KSVZ if model.upper() == 'KSVZ' else DFSZ
+
+    # Derived quantities
+    eta_A      = 10**(eta_A_dB / 10)                 # dB -> linear
+    s_per_year = 365.25 * 24 * 3600                  # [s/yr]
+    h_eV_Hz    = constants.h.to('eV s').value        # [eV·s]
+
+    # Axion mass and coupling arrays
+    ma_arr = h_eV_Hz * nu_arr                        # [eV]
+    g_ayy  = g_x(C_ag, ma_arr)                       # [GeV^-1]
+
+    # Scan rate: Eq. (3) of Brouwer et al. (2022)
+    prefactor = 41e3 / s_per_year                    # [Hz/s]
+
+    dnu_dt = (prefactor
+              * (3      / SNR   )**2
+              * (g_ayy  / 1e-19 )**4
+              * (rho_DM / 0.45  )**2
+              * (nu_arr / 100e3 )
+              * (c_PU   / 0.1   )**4
+              * (B0     / 16    )**4
+              * (V      / 10    )**(10/3)
+              * (Q      / 2e7   )
+              * (10e-3  / T     )
+              * (0.1    / eta_A ))
+
+    # Scan time: integrate 1/(dnu/dt) over the frequency band
+    scan_time_yr = integrate.simpson(1.0 / dnu_dt, x=nu_arr) / s_per_year
+
+    return scan_time_yr

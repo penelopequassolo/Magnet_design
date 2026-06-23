@@ -9,6 +9,9 @@ from matplotlib.lines import Line2D
 import config
 import plot_helpers as ph
 
+import matplotlib.ticker as ticker
+
+from plots_area import plot_combined_scan_log
 
 def _save(fig, name):
     plt.tight_layout()
@@ -26,7 +29,10 @@ def plot_all(grids):
     #_plot_scan(grids, x, y, suffix)
     #_plot_stress(grids, x, y, suffix)
     #_plot_jc(grids, x, y, suffix)
-    plot_combined(grids, x, y, suffix)
+    plot_combined_scan_log(grids, x, y, suffix)
+    plot_combined_b2v(grids, x, y, suffix)
+    plot_combined_scan_log_contour(grids, x, y, suffix)
+    plot_combined_b2v_contour(grids, x, y, suffix)
 
 
 # ── Individual maps ──────────────────────────────────────────────────────────
@@ -96,7 +102,7 @@ def _plot_jc(grids, x, y, suffix):
 
 
 # ── Combined map (B0 + scan rate + hoop stress) ──────────────────────────────
-def plot_combined(grids, x, y, suffix):
+def plot_combined_scan_log(grids, x, y, suffix):
     b0, scan, stress = grids["b0"], grids["scan"], grids["stress"]
     fig, ax = plt.subplots(figsize=(10, 7))
 
@@ -148,4 +154,237 @@ def plot_combined(grids, x, y, suffix):
                  f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
     ph.set_mm_axes(ax)
     ph.style_axes(ax)
+
+
+    _add_ref_magnets(ax, show_je=True, show_h=True)
+
     _save(fig, "contour_combined_sc.png")
+
+def plot_combined_b2v(grids, x, y, suffix):
+    b0, b2v, stress = grids["b0"], grids["b0"]**2 * grids["v"], grids["stress"]
+    b2v = np.where(np.isfinite(b2v) & (b2v > 0), b2v, np.nan)
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Background: hoop stress
+    lvl_st = ph.safe_levels(np.nanmin(stress), np.nanmax(stress), n=30)
+    cf = ax.contourf(x, y, stress, levels=lvl_st, cmap="YlOrRd", alpha=0.6)
+    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                        pad=0.02, aspect=40, shrink=0.95)
+    cbar.set_label("Hoop stress  σ_hoop  (MPa)", fontsize=10, labelpad=4)
+    cbar.ax.tick_params(labelsize=9, direction="in")
+
+    # Stress iso-lines
+    st_lvls = [lv for lv in config.STRESS_ISO_LEVELS
+               if np.nanmin(stress) <= lv <= np.nanmax(stress)]
+    if st_lvls:
+        cs = ax.contour(x, y, stress, levels=st_lvls,
+                        colors="saddlebrown", linewidths=1.2, linestyles="-.")
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} MPa", fontsize=8,
+                  inline=True, inline_spacing=4, colors="saddlebrown")
+
+    # B2V iso-lines
+    if np.isfinite(b2v).any():
+        bv_min, bv_max = np.nanmin(b2v), np.nanmax(b2v)
+        lvls = ticker.MaxNLocator(nbins=8, prune=None).tick_values(bv_min, bv_max)
+        lvls = [lv for lv in lvls if bv_min < lv < bv_max]
+        if lvls:
+            cs = ax.contour(x, y, b2v, levels=lvls,
+                            colors="steelblue", linewidths=1.2, linestyles="--")
+            ax.clabel(cs, fmt=lambda v: f"{v:.3g}", fontsize=8,
+                      inline=True, inline_spacing=4, colors="steelblue")
+
+    # B0 iso-lines
+    b0_lvls = [lv for lv in config.B0_ISO_LEVELS
+               if np.nanmin(b0) <= lv <= np.nanmax(b0)]
+    if b0_lvls:
+        cs = ax.contour(x, y, b0, levels=b0_lvls,
+                        colors="black", linewidths=1.8, linestyles="-")
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} T", fontsize=9,
+                  inline=True, inline_spacing=4, colors="black")
+
+    handles = [
+        Line2D([0], [0], color="black",       lw=1.8, ls="-",  label="B₀  (T)"),
+        Line2D([0], [0], color="steelblue",   lw=1.2, ls="--", label="B²V  (T²·m³)"),
+        Line2D([0], [0], color="saddlebrown", lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
+    ]
+    ax.legend(handles=handles, fontsize=10, loc="upper left",
+              framealpha=0.85, edgecolor="grey")
+
+    ax.set_title(f"Combined map — B₀ / B²V / Hoop stress  "
+                 f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
+    ph.set_mm_axes(ax)
+    ph.style_axes(ax)
+
+    _add_ref_magnets(ax, show_je=True, show_h=True)
+
+    _save(fig, "contour_combined_b2v.png")
+
+
+def plot_combined_scan_log_contour(grids, x, y, suffix):
+    b0, scan, stress = grids["b0"], grids["scan"], grids["stress"]
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Background: scan rate
+    scan_log = np.log10(np.where(scan > 0, scan, np.nan))
+    lvl_sc = ph.safe_levels(np.nanmin(scan_log), np.nanmax(scan_log), n=30)
+    cf = ax.contourf(x, y, scan_log, levels=lvl_sc, cmap="viridis", alpha=0.8)
+    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                        pad=0.02, aspect=40, shrink=0.95)
+    cbar.set_label("Scan rate  (log₁₀)", fontsize=10, labelpad=4)
+    cbar.ax.tick_params(labelsize=9, direction="in")
+
+    # Stress iso-lines
+    st_lvls = [lv for lv in config.STRESS_ISO_LEVELS
+               if np.nanmin(stress) <= lv <= np.nanmax(stress)]
+    if st_lvls:
+        cs = ax.contour(x, y, stress, levels=st_lvls,
+                        colors="crimson", linewidths=1.2, linestyles="-.")
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} MPa", fontsize=8,
+                  inline=True, inline_spacing=4, colors="crimson")
+
+    # Scan rate iso-lines
+    sr_lvls = np.arange(np.floor(np.nanmin(scan_log)),
+                        np.nanmax(scan_log) + 1, 1)
+    if len(sr_lvls) >= 2:
+        cs = ax.contour(x, y, scan_log, levels=sr_lvls,
+                        colors="steelblue", linewidths=1.2, linestyles="--")
+        ax.clabel(cs, fmt=lambda v: f"{v:.1f}", fontsize=8,
+                  inline=True, inline_spacing=4, colors="steelblue")
+
+    # B0 iso-lines
+    b0_lvls = [lv for lv in config.B0_ISO_LEVELS
+               if np.nanmin(b0) <= lv <= np.nanmax(b0)]
+    if b0_lvls:
+        cs = ax.contour(x, y, b0, levels=b0_lvls,
+                        colors="black", linewidths=1.8, linestyles="-")
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} T", fontsize=9,
+                  inline=True, inline_spacing=4, colors="black")
+
+    handles = [
+        Line2D([0], [0], color="black",       lw=1.8, ls="-",  label="B₀  (T)"),
+        Line2D([0], [0], color="steelblue",   lw=1.2, ls="--", label="Scan rate  (log₁₀)"),
+        Line2D([0], [0], color="saddlebrown", lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
+    ]
+    ax.legend(handles=handles, fontsize=10, loc="upper left",
+              framealpha=0.85, edgecolor="grey")
+    ax.set_title(f"Combined map — B₀ / Scan rate / Hoop stress  "
+                 f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
+    ph.set_mm_axes(ax)
+    ph.style_axes(ax)
+
+
+    _add_ref_magnets(ax, show_je=True, show_h=True)
+
+    _save(fig, "contour_combined_sc_contour.png")
+
+
+def plot_combined_b2v_contour(grids, x, y, suffix):
+    b0, b2v, stress = grids["b0"], grids["b0"]**2 * grids["v"], grids["stress"]
+    b2v = np.where(np.isfinite(b2v) & (b2v > 0), b2v, np.nan)
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Background: B2V
+    if np.isfinite(b2v).any():
+        bv_min, bv_max = np.nanmin(b2v), np.nanmax(b2v)
+        lvl_bv = ph.safe_levels(bv_min, bv_max, n=30)
+        cf = ax.contourf(x, y, b2v, levels=lvl_bv, cmap="viridis", alpha=0.8)
+        cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                            pad=0.02, aspect=40, shrink=0.95)
+        cbar.set_label("B²V  (T²·m³)", fontsize=10, labelpad=4)
+        cbar.ax.tick_params(labelsize=9, direction="in")
+
+    # Stress iso-lines
+    st_lvls = [lv for lv in config.STRESS_ISO_LEVELS
+               if np.nanmin(stress) <= lv <= np.nanmax(stress)]
+    if st_lvls:
+        cs = ax.contour(x, y, stress, levels=st_lvls,
+                        colors="crimson", linewidths=1.2, linestyles="-.")
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} MPa", fontsize=8,
+                  inline=True, inline_spacing=4, colors="crimson")
+
+    # B2V iso-lines
+    if np.isfinite(b2v).any():
+        lvls = ticker.MaxNLocator(nbins=8, prune=None).tick_values(bv_min, bv_max)
+        lvls = [lv for lv in lvls if bv_min < lv < bv_max]
+        if lvls:
+            cs = ax.contour(x, y, b2v, levels=lvls,
+                            colors="steelblue", linewidths=1.2, linestyles="--")
+            ax.clabel(cs, fmt=lambda v: f"{v:.3g}", fontsize=8,
+                      inline=True, inline_spacing=4, colors="steelblue")
+
+    # B0 iso-lines
+    b0_lvls = [lv for lv in config.B0_ISO_LEVELS
+               if np.nanmin(b0) <= lv <= np.nanmax(b0)]
+    if b0_lvls:
+        cs = ax.contour(x, y, b0, levels=b0_lvls,
+                        colors="black", linewidths=1.8, linestyles="-")
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} T", fontsize=9,
+                  inline=True, inline_spacing=4, colors="black")
+
+    handles = [
+        Line2D([0], [0], color="black",       lw=1.8, ls="-",  label="B₀  (T)"),
+        Line2D([0], [0], color="steelblue",   lw=1.2, ls="--", label="B²V  (T²·m³)"),
+        Line2D([0], [0], color="crimson",     lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
+    ]
+    ax.legend(handles=handles, fontsize=10, loc="upper left",
+              framealpha=0.85, edgecolor="grey")
+    ax.set_title(f"Combined map — B₀ / B²V / Hoop stress  "
+                 f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
+    ph.set_mm_axes(ax)
+    ph.style_axes(ax)
+
+    _add_ref_magnets(ax, show_je=True, show_h=True)
+
+    _save(fig, "contour_combined_b2v_contour.png")
+
+
+    # ── Reference magnets ─────────────────────────────────────────────────────────
+_REF_MAGNETS = [
+    {
+        "label":  "UHF Solenoid\n(Muon Collider, CERN)",
+        "ri_mm":  30.0,
+        "th_mm":  60.0,
+        "b0":     40.0,
+        "je":     632.0,
+        "h_mm":   700.0,
+        "marker": "D",
+        "color":  "lime",
+        "zorder": 10,
+    },
+    {
+        "label":  "ASIPP/Tsinghua\n32.4 T",
+        "ri_mm":  8.5,
+        "th_mm":  37.7,
+        "b0":     32.4,
+        "je":     None,
+        "h_mm":   None,
+        "marker": "^",
+        "color":  "cyan",
+        "zorder": 10,
+    },
+]
+
+def _add_ref_magnets(ax, show_je=False, show_h=False):
+    for m in _REF_MAGNETS:
+        ri = m["ri_mm"]
+        th = m["th_mm"]
+        ax.scatter(ri, th,
+                   marker=m["marker"], s=120,
+                   color=m["color"], edgecolors="black", linewidths=0.8,
+                   zorder=m["zorder"])
+        lines = [m["label"], f"B₀ = {m['b0']:.1f} T"]
+        if show_je and m["je"] is not None:
+            lines.append(f"Je = {m['je']:.0f} A/mm²")
+        if show_h and m["h_mm"] is not None:
+            lines.append(f"H = {m['h_mm']:.0f} mm")
+        ax.annotate(
+            "\n".join(lines),
+            xy=(ri, th),
+            xytext=(ri + 4, th + 4),
+            fontsize=7,
+            color="white",
+            bbox=dict(boxstyle="round,pad=0.3",
+                      fc="black", ec=m["color"], alpha=0.75, lw=0.8),
+            arrowprops=dict(arrowstyle="-", color=m["color"], lw=0.8),
+            zorder=m["zorder"] + 1,
+        )

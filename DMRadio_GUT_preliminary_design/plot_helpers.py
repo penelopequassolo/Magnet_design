@@ -76,10 +76,10 @@ def title_suffix_th():
     return (f"L = {solenoid_lib.solenoid_length*1e3:.0f} mm (fixed)  |  "
             f"Je = self-consistent (scaling law)  |  "
             f"margin = {solenoid_lib.margin*100:.0f}%  |  "
-            f"Ri : 10 → 1000 mm  |  Th : 10 → 100 mm")
+            f"Ri : 10 → 1000 mm  |  Th : 2 → 200 mm")
 
 
 def title_suffix_area():
     return (f"L = {solenoid_lib.solenoid_length*1e3:.0f} mm (fixed)  |  "
             f"Je = self-consistent (scaling law)  |  "
-            f"margin = {solenoid_lib.margin*100:.0f}%  |  "
+            f"margin = {solenoid_lib.margin*100:.0f}%  |  ")
