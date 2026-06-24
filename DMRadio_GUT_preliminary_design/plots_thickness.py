@@ -62,13 +62,13 @@ def _plot_je(grids, x, y, suffix):
 
 def _plot_scan(grids, x, y, suffix):
     scan = grids["scan"]
-    scan_log = np.log10(np.where(scan > 0, scan, np.nan))
+    scan_log = np.where(scan > 0, scan, np.nan)
     fig, ax = plt.subplots(figsize=(10, 7))
     levels = ph.safe_levels(np.nanmin(scan_log), np.nanmax(scan_log), n=20)
     ph.make_contour_plot(
         fig, ax, x, y, scan_log, levels, "jet", "%.1f",
         "log₁₀(Scan rate)  [log₁₀((T²·m^(5/3))²)]",
-        r"Scan rate  $(B_0^2 \cdot V_{\rm bore}^{5/3})^2$"
+        r"Scan rate  $$(B_0^2 \cdot V_{\rm bore}^{5/3})^2$$"
         + f"  [self-consistent Je]\n{suffix}")
     ph.add_b0_contours(ax, x, y, grids["b0"])
     ph.set_mm_axes(ax)
@@ -82,7 +82,7 @@ def _plot_stress(grids, x, y, suffix):
     ph.make_contour_plot(
         fig, ax, x, y, st, levels, "jet", "%.0f MPa",
         "Hoop stress  σ_hoop  (MPa)",
-        r"Hoop stress  $\sigma_{\rm hoop}$"
+        r"Hoop stress  $$\sigma_{\rm hoop}$$"
         + f"  [self-consistent Je]\n{suffix}")
     ph.add_b0_contours(ax, x, y, grids["b0"])
     ph.set_mm_axes(ax)
@@ -123,14 +123,14 @@ def plot_combined_scan_log(grids, x, y, suffix):
         ax.clabel(cs, fmt=lambda v: f"{v:.0f} MPa", fontsize=8,
                   inline=True, inline_spacing=4, colors="saddlebrown")
 
-    # Scan-rate iso-lines (log10)
-    scan_log = np.log10(np.where(scan > 0, scan, np.nan))
-    sr_lvls = np.arange(np.floor(np.nanmin(scan_log)),
-                        np.nanmax(scan_log) + 1, 1)
-    if len(sr_lvls) >= 2:
-        cs = ax.contour(x, y, scan_log, levels=sr_lvls,
+    # Scan time iso-lines [years]
+    MAX_SCAN_YEARS = 30
+    scan_masked = np.where((scan > 0) & (scan < MAX_SCAN_YEARS), scan, np.nan)
+    sr_lvls = [1, 3, 6, 10, 15, 20]
+    if np.isfinite(scan_masked).any():
+        cs = ax.contour(x, y, scan_masked, levels=sr_lvls,
                         colors="steelblue", linewidths=1.2, linestyles="--")
-        ax.clabel(cs, fmt=lambda v: f"{v:.1f}", fontsize=8,
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} yr", fontsize=8,
                   inline=True, inline_spacing=4, colors="steelblue")
 
     # B0 iso-lines
@@ -144,21 +144,21 @@ def plot_combined_scan_log(grids, x, y, suffix):
 
     handles = [
         Line2D([0], [0], color="black",       lw=1.8, ls="-",  label="B₀  (T)"),
-        Line2D([0], [0], color="steelblue",   lw=1.2, ls="--", label="Scan rate  (log₁₀)"),
+        Line2D([0], [0], color="steelblue",   lw=1.2, ls="--", label="Scan time  (yr)"),
         Line2D([0], [0], color="saddlebrown", lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
     ]
     ax.legend(handles=handles, fontsize=10, loc="upper left",
               framealpha=0.85, edgecolor="grey")
 
-    ax.set_title(f"Combined map — B₀ / Scan rate / Hoop stress  "
+    ax.set_title(f"Combined map — B₀ / Scan time / Hoop stress  "
                  f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
     ph.set_mm_axes(ax)
     ph.style_axes(ax)
 
-
     _add_ref_magnets(ax, show_je=True, show_h=True)
 
     _save(fig, "contour_combined_sc.png")
+
 
 def plot_combined_b2v(grids, x, y, suffix):
     b0, b2v, stress = grids["b0"], grids["b0"]**2 * grids["v"], grids["stress"]
@@ -224,14 +224,17 @@ def plot_combined_scan_log_contour(grids, x, y, suffix):
     b0, scan, stress = grids["b0"], grids["scan"], grids["stress"]
     fig, ax = plt.subplots(figsize=(10, 7))
 
-    # Background: scan rate
-    scan_log = np.log10(np.where(scan > 0, scan, np.nan))
-    lvl_sc = ph.safe_levels(np.nanmin(scan_log), np.nanmax(scan_log), n=30)
-    cf = ax.contourf(x, y, scan_log, levels=lvl_sc, cmap="viridis", alpha=0.8)
-    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
-                        pad=0.02, aspect=40, shrink=0.95)
-    cbar.set_label("Scan rate  (log₁₀)", fontsize=10, labelpad=4)
-    cbar.ax.tick_params(labelsize=9, direction="in")
+    # Background: scan time
+    MAX_SCAN_YEARS = 30
+    scan_masked = np.where((scan > 0) & (scan < MAX_SCAN_YEARS), scan, np.nan)
+
+    if np.isfinite(scan_masked).any():
+        lvl_sc = ph.safe_levels(np.nanmin(scan_masked), np.nanmax(scan_masked), n=30)
+        cf = ax.contourf(x, y, scan_masked, levels=lvl_sc, cmap="viridis", alpha=0.8)
+        cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                            pad=0.02, aspect=40, shrink=0.95)
+        cbar.set_label("Scan time  (yr)", fontsize=10, labelpad=4)
+        cbar.ax.tick_params(labelsize=9, direction="in")
 
     # Stress iso-lines
     st_lvls = [lv for lv in config.STRESS_ISO_LEVELS
@@ -242,13 +245,12 @@ def plot_combined_scan_log_contour(grids, x, y, suffix):
         ax.clabel(cs, fmt=lambda v: f"{v:.0f} MPa", fontsize=8,
                   inline=True, inline_spacing=4, colors="crimson")
 
-    # Scan rate iso-lines
-    sr_lvls = np.arange(np.floor(np.nanmin(scan_log)),
-                        np.nanmax(scan_log) + 1, 1)
-    if len(sr_lvls) >= 2:
-        cs = ax.contour(x, y, scan_log, levels=sr_lvls,
+    # Scan time iso-lines [years]
+    sr_lvls = [1, 3, 6, 10, 15, 20]
+    if np.isfinite(scan_masked).any():
+        cs = ax.contour(x, y, scan_masked, levels=sr_lvls,
                         colors="steelblue", linewidths=1.2, linestyles="--")
-        ax.clabel(cs, fmt=lambda v: f"{v:.1f}", fontsize=8,
+        ax.clabel(cs, fmt=lambda v: f"{v:.0f} yr", fontsize=8,
                   inline=True, inline_spacing=4, colors="steelblue")
 
     # B0 iso-lines
@@ -262,16 +264,15 @@ def plot_combined_scan_log_contour(grids, x, y, suffix):
 
     handles = [
         Line2D([0], [0], color="black",       lw=1.8, ls="-",  label="B₀  (T)"),
-        Line2D([0], [0], color="steelblue",   lw=1.2, ls="--", label="Scan rate  (log₁₀)"),
-        Line2D([0], [0], color="saddlebrown", lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
+        Line2D([0], [0], color="steelblue",   lw=1.2, ls="--", label="Scan time  (yr)"),
+        Line2D([0], [0], color="crimson",     lw=1.2, ls="-.", label="Hoop stress  (MPa)"),
     ]
     ax.legend(handles=handles, fontsize=10, loc="upper left",
               framealpha=0.85, edgecolor="grey")
-    ax.set_title(f"Combined map — B₀ / Scan rate / Hoop stress  "
+    ax.set_title(f"Combined map — B₀ / Scan time / Hoop stress  "
                  f"[self-consistent Je]\n{suffix}", fontsize=10, pad=52)
     ph.set_mm_axes(ax)
     ph.style_axes(ax)
-
 
     _add_ref_magnets(ax, show_je=True, show_h=True)
 
@@ -338,7 +339,7 @@ def plot_combined_b2v_contour(grids, x, y, suffix):
     _save(fig, "contour_combined_b2v_contour.png")
 
 
-    # ── Reference magnets ─────────────────────────────────────────────────────────
+# ── Reference magnets ─────────────────────────────────────────────────────────
 _REF_MAGNETS = [
     {
         "label":  "UHF Solenoid\n(Muon Collider, CERN)",
@@ -362,6 +363,17 @@ _REF_MAGNETS = [
         "color":  "cyan",
         "zorder": 10,
     },
+    #{
+    #    "label":  "DMRadio Target\n16 T, 10 m³\n6.2 yr scan",
+    #    "ri_mm":  1261.0,
+    #    "th_mm":  160.0,
+    #    "b0":     16.0,
+    #    "je":     600.0,
+    #    "h_mm":   2000.0,
+    #    "marker": "*",
+    #    "color":  "gold",
+    #    "zorder": 10,
+    #},
 ]
 
 def _add_ref_magnets(ax, show_je=False, show_h=False):

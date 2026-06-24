@@ -5,6 +5,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 import importlib
 
+
 import numpy as np
 
 
@@ -21,6 +22,7 @@ def _empty_result_grids(shape):
     nan = lambda: np.full(shape, np.nan)
     return {
         "b0":        nan(),
+        "v_bore":    nan(),
         "scan":      nan(),
         "stress":    nan(),
         "j_crit":    nan(),
@@ -66,10 +68,13 @@ def _solve_cell(ri, rf, v, je_mech_mm2=None):
     sigma_pa, _ = solenoid_lib.hoop_stress(ri, rf, je_si, solenoid_lib.solenoid_length)
     j_crit_mm2, je_em_mm2 = solenoid_lib.Je_tape(b0, solenoid_lib.theta_solenoid)
     load_ratio = j_crit_mm2 / je_mm2
+    v = np.pi * ri**2 * solenoid_lib.solenoid_length
 
     return {
         "b0":        b0,
-        "scan":      (b0**2 * v**(5 / 3))**2,
+        "v_bore":    v,
+        "scan":      solenoid_lib.scan_time(b0, v),
+        #"scan":      (b0**2 * v**(5 / 3))**2,
         "stress":    sigma_pa / 1e6,
         "j_crit":    j_crit_mm2,
         "je_max":    je_em_mm2,
@@ -112,7 +117,7 @@ def build_thickness_grid():
     print("\n2-D meshgrid (Th-scan) computed.")
     grids = {"ri": ri, "th": th, "rf": rf, "v": v, **res}
     _print_summary(grids, total, label="Th",
-                   extra={"Th": th * 1e3, "V_bore": v * 1e6})
+                   extra={"Th": th * 1e3, "v_bore": v * 1e6})
     return grids
 
 
@@ -131,10 +136,19 @@ def build_area_grid():
 
     # A_total = pi((Ri+Th)^2 - Ri^2)  ->  Th = sqrt(Ri^2 + A_total/pi) - Ri
     th = np.sqrt(ri**2 + a_total / np.pi) - ri
+    th_sc = np.sqrt(ri**2 + a_sc / np.pi) - ri
+
     rf = ri + th
+    rf_sc = ri + th_sc
     v  = np.pi * ri**2 * solenoid_lib.solenoid_length
     
-    rebco_total_length = a_sc * solenoid_lib.solenoid_length/(solenoid_lib.t_tape_mm*1e-3)
+    n_turns_radial     = th_sc / (solenoid_lib.t_tape_mm * 1e-3)       # [—]
+    r_mean             = ri + th_sc / 2.0                               # [m]
+    rebco_pancake_length = n_turns_radial * 2 * np.pi * r_mean       # [m]
+
+    
+    n_pancakes           = solenoid_lib.solenoid_length / (solenoid_lib.w_tape_mm * 1e-3)
+    rebco_total_length   = rebco_pancake_length * n_pancakes            # [m]
 
     res = _empty_result_grids((config.N_A, config.N_RI_A))
     total = config.N_RI_A * config.N_A
@@ -170,12 +184,15 @@ def build_area_grid():
 
 
     print("\n2-D meshgrid (A-scan) computed.")
-    grids = {"ri": ri, "a": a_total, "a_sc": a_sc, "rebco_total_length": rebco_total_length,
-             "th": th, "rf": rf, "v": v, **res}
+    grids = {"ri": ri, "a": a_total, "a_sc": a_sc,
+         "rebco_pancake_length": rebco_pancake_length,
+         "rebco_total_length": rebco_total_length,
+         "th": th, "rf": rf, "v": v, **res}
     _print_summary(grids, total, label="A",
                    extra={"A_total (mm²)": a_total * 1e6,
                           "A_SC (mm²)": a_sc * 1e6,
                           "Th (derived)": th * 1e3})
+    
     return grids
 
 
@@ -196,3 +213,4 @@ def _print_summary(grids, total, label, extra=None):
         print(f"  B0              : {np.nanmin(b0):.3f} – {np.nanmax(b0):.3f} T")
         print(f"  Stress          : {np.nanmin(grids['stress']):.1f} – "
               f"{np.nanmax(grids['stress']):.1f} MPa")
+        

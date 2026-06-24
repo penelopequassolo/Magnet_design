@@ -21,7 +21,7 @@ geometric_factor = 0.2235
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixed solenoid parameters
 # ─────────────────────────────────────────────────────────────────────────────
-solenoid_length = 1.0      # [m]
+solenoid_length = 5      # [m]
 je_nominal      = 630e6    # [A/m²]  tape engineering Je (630 A/mm²)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +40,19 @@ margin      = 0.5     # [—]      margin applied to obtain the operating curren
 # ─────────────────────────────────────────────────────────────────────────────
 theta_solenoid = np.pi / 2   # B // ab-plane — worst case for a solenoid
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Scan time parameters
+# ─────────────────────────────────────────────────────────────────────────────
+SCAN_MODEL  = 'DFSZ'
+SCAN_SNR    = 3.0
+SCAN_C_PU   = 0.1
+SCAN_Q      = 20e6
+SCAN_ETA_A  = 0.1
+SCAN_T      = 10e-3
+SCAN_RHO_DM = 0.45
+SCAN_G_AYY  = 1e-19
+SCAN_NU_MIN = 0.1e6
+SCAN_NU_MAX = 30e6
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1.  Ic_tape  —  empirical critical current scaling law
@@ -332,3 +345,96 @@ def solenoid_summary(ri: float, rf: float,
         "je_op"          : je_op,            # [A/mm²] engineering Je at b0
         "theta"          : theta,
     }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Axion model parameters
+# ─────────────────────────────────────────────────────────────────────────────
+
+KSVZ = 1.92
+DFSZ = 0.75
+
+s_per_year = 365.25 * 24 * 3600   # [s/yr]
+
+def g_axion_photon(C_ag: float, m_a_eV: float) -> float:
+    """
+    Axion–photon coupling  [GeV⁻¹].
+
+    Parameters
+    ----------
+    C_ag   : model coefficient  (DFSZ = 0.75, KSVZ = 1.92)
+    m_a_eV : axion mass [eV]
+    """
+    return 2e-10 * C_ag * m_a_eV
+
+
+def dB_to_eta(dB: float) -> float:
+    """Convert dB backaction reduction to linear amplitude efficiency η_A."""
+    return 10 ** (dB / 20.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scan time
+# ─────────────────────────────────────────────────────────────────────────────
+
+def scan_time(b0: float,
+              v: float,
+              model:   str   = SCAN_MODEL,
+              SNR:     float = SCAN_SNR,
+              c_PU:    float = SCAN_C_PU,
+              Q:       float = SCAN_Q,
+              eta_A:   float = SCAN_ETA_A,
+              T:       float = SCAN_T,
+              rho_DM:  float = SCAN_RHO_DM,
+              g_ayy:   float = SCAN_G_AYY,
+              nu_min:  float = SCAN_NU_MIN,
+              nu_max:  float = SCAN_NU_MAX) -> float:
+    """
+    Total scan time  [years]  to cover the frequency band [nu_min, nu_max].
+
+    Parameters
+    ----------
+    B0      : central magnetic field        [T]
+    V       : cavity volume                 [m³]
+    model   : 'DFSZ', 'KSVZ', or None
+              If None, g_ayy is used directly.
+    SNR     : signal-to-noise threshold     [—]
+    c_PU    : pick-up coupling coefficient  [—]
+    Q       : cavity quality factor         [—]
+    eta_A   : backaction amplitude efficiency η_A  [—]
+    T       : system noise temperature      [K]
+    rho_DM  : local dark-matter density     [GeV cm⁻³]
+    g_ayy   : fixed coupling (model=None)   [GeV⁻¹]
+    nu_min  : lower frequency bound         [Hz]
+    nu_max  : upper frequency bound         [Hz]
+
+    Returns
+    -------
+    t_scan : total scan time [years]
+    """
+    from scipy import integrate
+    from astropy import constants
+
+    C_ag = DFSZ if model == 'DFSZ' else KSVZ
+
+    prefactor = (41e3 / s_per_year
+                 * (SNR    / 3      ) ** -2
+                 * (rho_DM / 0.45   ) **  2
+                 * (c_PU   / 0.1    ) **  4
+                 * (b0     / 16     ) **  4
+                 * (v      / 10     ) ** (10 / 3)
+                 * (Q      / 2e7    )
+                 * (10e-3  / T      )
+                 * (0.1    / eta_A  ))
+
+    def integrand(nu: float) -> float:
+        if model is None:
+            g = g_ayy
+        else:
+            m_a_eV = constants.h.to('eV/Hz').value * nu
+            g      = g_axion_photon(C_ag, m_a_eV)
+
+        dnu_dt = prefactor * (g / 1e-19) ** 4 * (nu / 100e3)
+        return 1.0 / dnu_dt
+
+    result, _ = integrate.quad(integrand, nu_min, nu_max)
+    return result / s_per_year

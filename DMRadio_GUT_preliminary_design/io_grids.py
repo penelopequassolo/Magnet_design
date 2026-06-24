@@ -10,13 +10,20 @@ import pandas as pd
 
 # Fields that are 2-D grids we want to persist.
 _GRID_FIELDS = [
-    "ri", "th", "rf", "v", "a",          # geometry (a only present in A-scan)
-    "b0", "scan", "stress", "j_crit",
-    "je_max", "je_sc", "margin", "converged",
+    # geometry
+    "ri", "rf", "th", "a", "a_sc", "v", "v_bore",
+    # electromagnetic
+    "b0", "b_center", "scan", "je", "je_sc", "je_max", "je_mech",
+    # stress
+    "stress", "stress_hoop",
+    # ReBCO tape
+    "rebco_pancake_length", "rebco_total_length",
+    # solver diagnostics
+    "j_crit", "margin", "converged",
 ]
 
 
-def save_grids_long(grids, path):
+def save_grids_long(grids, path, solenoid_length=None):
     """
     Save all grids in a single tidy/long CSV: one row per cell, one column
     per field. This is the easiest format to re-load and to inspect.
@@ -26,25 +33,24 @@ def save_grids_long(grids, path):
     n = grids["ri"].size
 
     data = {}
-    # Cell indices help you reshape back to 2-D later.
     ii, jj = np.indices(shape)
     data["row_i"] = ii.ravel()
     data["col_j"] = jj.ravel()
 
+    # Scalar metadata broadcast to every row
+    if solenoid_length is not None:
+        data["solenoid_length_m"] = np.full(n, solenoid_length)
+
     for f in present:
         arr = np.asarray(grids[f])
         if arr.shape != shape:
-            # skip anything that isn't a full grid (defensive)
             continue
         data[f] = arr.ravel()
 
     df = pd.DataFrame(data)
-    df.attrs["n_rows"] = shape[0]
-    df.attrs["n_cols"] = shape[1]
     df.to_csv(path, index=False)
     print(f"Saved long-format grids -> {path}  ({n} cells, {len(present)} fields)")
     return df
-
 
 def save_grids_matrices(grids, out_dir, prefix=""):
     """
