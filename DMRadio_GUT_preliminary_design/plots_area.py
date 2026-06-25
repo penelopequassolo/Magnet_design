@@ -1,6 +1,6 @@
 # plots_area.py
 import importlib
-
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -148,19 +148,54 @@ def _draw_scan_iso(ax, x, y, scan_masked):
                   inline=True, inline_spacing=4, colors="steelblue")
 
 
+def _draw_magnet_points(ax, solenoid_length_m, csv_path="magnet_characteristics.csv"):
+    try:
+        df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        print(f"  [!] Magnet CSV not found: {csv_path}")
+        return
+
+    df = df[np.isclose(df['solenoid_length_m'], solenoid_length_m)].copy()
+
+    if df.empty:
+        print(f"  [!] No magnet points for solenoid_length_m = {solenoid_length_m}")
+        return
+
+    marker_styles = {
+        1.0:  ('o', 'white'),
+        2.0:  ('s', 'white'),
+        3.0:  ('^', 'white'),
+        4.0:  ('D', 'white'),
+        5.0:  ('P', 'white'),
+        10.0: ('*', 'white'),
+    }
+
+    for conductor_l, group in df.groupby('conductor_length_m'):
+        marker, face = marker_styles.get(conductor_l, ('o', 'white'))
+        ax.scatter(
+            group['ri'] * 1e3,
+            group['rebco_pancake_length'],
+            marker=marker,
+            s=80,
+            facecolors=face,
+            edgecolors='black',
+            linewidths=1.2,
+            zorder=10,
+            label=f'{conductor_l:g}m conductor',
+        )
+
+    ax.legend(fontsize=8, loc='upper right', framealpha=0.85, edgecolor='grey')
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Plot functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plot_all(grids, label=""):
+def plot_all(grids, label, solenoid_length_m):
     x = grids["ri"] * 1e3
     y = grids["rebco_pancake_length"]
     suffix = ph.title_suffix_area()
-
-    #plot_combined_scan_log(grids, x, y, suffix, label)
-    #plot_combined_b2v(grids, x, y, suffix, label)
-    plot_combined_scan_log_contour(grids, x, y, suffix, label)
-    #plot_combined_b2v_contour(grids, x, y, suffix, label)
+    plot_combined_scan_log_contour(grids, x, y, suffix, label, solenoid_length_m)
 
 
 def plot_combined_scan_log(grids, x, y, suffix, label=""):
@@ -198,13 +233,14 @@ def plot_combined_b2v(grids, x, y, suffix, label=""):
     _save(fig, "contour_combined_Ascan_b2v_stress_bg", label)
 
 
-def plot_combined_scan_log_contour(grids, x, y, suffix, label=""):
+def plot_combined_scan_log_contour(grids, x, y, suffix, label="", solenoid_length_m=1.0):
     fig, ax = plt.subplots(figsize=(10, 7))
     scan_masked = _draw_background_scanlog(fig, ax, x, y, grids["scan"])
     _draw_stress_iso(ax, x, y, grids["stress"])
     _draw_scan_iso(ax, x, y, scan_masked)
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
+    _draw_magnet_points(ax, solenoid_length_m)       # ← pass length
     _finish(ax, grids, suffix, "Scan time", "Scan time  (yr)", "steelblue")
     _save(fig, "contour_combined_Ascan_sc_filled", label)
 
@@ -216,15 +252,4 @@ def plot_combined_b2v_contour(grids, x, y, suffix, label=""):
     if np.isfinite(b2v).any():
         _draw_background_b2v(fig, ax, x, y, b2v)
         _draw_stress_iso(ax, x, y, grids["stress"])
-        bv_min, bv_max = np.nanmin(b2v), np.nanmax(b2v)
-        lvls = ticker.MaxNLocator(nbins=8, prune=None).tick_values(bv_min, bv_max)
-        lvls = [lv for lv in lvls if bv_min < lv < bv_max]
-        if lvls:
-            cs = ax.contour(x, y, b2v, levels=lvls,
-                            colors="steelblue", linewidths=1.2, linestyles="--")
-            ax.clabel(cs, fmt=lambda v: f"{v:.3g}", fontsize=8,
-                      inline=True, inline_spacing=4, colors="steelblue")
-    _draw_b0_iso(ax, x, y, grids["b0"])
-    _draw_thickness_iso(ax, x, y, grids["th"])
-    _finish(ax, grids, suffix, "B²V", "B²V  (T²·m³)", "steelblue")
-    _save(fig, "contour_combined_Ascan_b2v_filled", label)
+        bv_min, bv_max = np.nanmin(b2v),
