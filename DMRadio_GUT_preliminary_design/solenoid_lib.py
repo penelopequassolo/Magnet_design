@@ -438,3 +438,39 @@ def scan_time(b0: float,
 
     result, _ = integrate.quad(integrand, nu_min, nu_max)
     return result / s_per_year
+
+# # ─────────────────────────────────────────────────────────────────────────────
+# # Scan time baseline
+# # ─────────────────────────────────────────────────────────────────────────────
+# SCAN_BASE_FIELD_T  = 18.0   # [T]   reference field
+# SCAN_BASE_TIME_YR  = 2.24   # [yr]  scan time at reference field
+
+# # ─────────────────────────────────────────────────────────────────────────────
+# # 5.  Scan time  —  empirical B^4 scaling
+# # ─────────────────────────────────────────────────────────────────────────────
+
+# def scan_time(field_T: float,
+#               base_field: float = SCAN_BASE_FIELD_T,
+#               base_time_yr: float = SCAN_BASE_TIME_YR
+#               ) -> float:
+#     """
+#     Total scan time [years] to cover the target frequency band.
+
+#     Scan time scales inversely with the fourth power of the field:
+
+#         t(B) = t_ref × (B_ref / B)^4
+
+#     Anchored to the empirical baseline:
+#         B_ref = 18 T  →  t_ref = 2.24 yr
+
+#     Parameters
+#     ----------
+#     field_T      : operating magnetic field [T]
+#     base_field   : reference field          [T]   (default 18 T)
+#     base_time_yr : scan time at base_field  [yr]  (default 2.24 yr)
+
+#     Returns
+#     -------
+#     t_scan : total scan time [years]
+#     """
+#     return base_time_yr * (base_field / field_T) ** 4
