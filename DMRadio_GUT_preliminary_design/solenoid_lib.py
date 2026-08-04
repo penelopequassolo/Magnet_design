@@ -27,14 +27,14 @@ je_nominal      = 630e6    # [A/m²]  tape engineering Je (630 A/mm²)
 # ─────────────────────────────────────────────────────────────────────────────
 # REBCO tape geometry
 # ─────────────────────────────────────────────────────────────────────────────
-t_tape_mm = 0.1     # Total tape thickness [mm]
+t_tape_mm = 0.15     # Total tape thickness [mm]
 t_sc_mm   = 0.002   # SC layer thickness   [mm]  (2 µm)
 w_tape_mm = 4.0     # Tape width           [mm]
 
-Cu = 0.8                 # [—]      copper fraction of the tape cross-section 
-Cu_SC_ratio = 1 /(1-Cu)  # [—]      ratio of total tape cross-section to SC layer cross-section  (1 + r) = (1 + Cu/SC)= 1 / (1 - Cu)
+#Cu = 0.8                 # [—]      copper fraction of the tape cross-section 
+#Cu_SC_ratio = 1 /(1-Cu)  # [—]      ratio of total tape cross-section to SC layer cross-section  (1 + r) = (1 + Cu/SC)= 1 / (1 - Cu)
 
-margin      = 0.5     # [—]      margin applied to obtain the operating current density Je_op from the engineering current density Je
+margin      = (1-0.4)     # [—]      margin applied to obtain the operating current density Je_op from the engineering current density Je
 # ─────────────────────────────────────────────────────────────────────────────
 # Field angle
 # ─────────────────────────────────────────────────────────────────────────────
@@ -92,27 +92,31 @@ def Ic_tape(b: float, theta: float) -> float:
     )
 
 
-def Je_tape(b: float, theta: float) -> float:
+def Je_tape(b: float, theta: float, cu_frac: float = 0.8) -> tuple[float, float]:
     """
     Engineering current density [A/mm²] at field b and angle theta,
-    derated by 90% fill factor.
+    derated by margin.
 
     Parameters
-    ----------i want a table
-    b     : field magnitude [T]
-    theta : field angle [rad] w.r.t. c-axis
+    ----------
+    b       : field magnitude [T]
+    theta   : field angle [rad] w.r.t. c-axis
+    cu_frac : copper fraction of the tape cross-section (default 0.8)
 
     Returns
     -------
-    je : engineering current density [A/mm²]
+    jc_tape_mm2 : critical current density [A/mm²]
+    je_max      : engineering current density [A/mm²]
     """
-    ic          = Ic_tape(b, theta)          # [A]      for tape of width w_tape_mm
-    ic_w        = ic / w_tape_mm             # [A/mm]   per mm of tape width
-    jc_tape_mm2 = ic_w / t_tape_mm/Cu_SC_ratio           # [A/mm²]  over full tape cross-section
-    je_max       = jc_tape_mm2 * (margin)   # [A/mm²]  derated by margin to get operating Je
+    # Calculate ratio dynamically based on the passed copper fraction
+    cu_sc_ratio = 1.0 / (1.0 - cu_frac)  # [—] ratio of total tape cross-section to SC layer cross-section
+    
+    ic          = Ic_tape(b, theta)                   # [A]      for tape of width w_tape_mm
+    ic_w        = ic / w_tape_mm                      # [A/mm]   per mm of tape width
+    jc_tape_mm2 = (ic_w / t_tape_mm) / cu_sc_ratio    # [A/mm²]  over full tape cross-section
+    je_max      = jc_tape_mm2 * margin                # [A/mm²]  derated by margin
 
     return jc_tape_mm2, je_max
-
 def je_max_stress_limited(ri: float, rf: float,
                            l: float = solenoid_length,
                            sigma_limit: float = 500e6) -> float:
@@ -303,7 +307,8 @@ def hoop_stress(ri: float, rf: float,
 def solenoid_summary(ri: float, rf: float,
                      j: float = je_nominal,
                      l: float = solenoid_length,
-                     theta: float = theta_solenoid) -> dict:
+                     theta: float = theta_solenoid,
+                     cu_frac: float = 0.8) -> dict:
     """
     Collect all key solenoid outputs at a fixed engineering Je = j.
 
@@ -318,9 +323,10 @@ def solenoid_summary(ri: float, rf: float,
     v_bore        = np.pi * ri**2 * l
 
     # Ic and Je at operating field
-    ic_op  = Ic_tape(b0, theta)              # [A]     for tape of width w_tape_mm
-    ic_abs = ic_op * (w_tape_mm * 1e-3)      # [A]     for one tape (SI width)
-    je_op  = Je_tape(b0, theta)              # [A/mm²] engineering Je, 90% derated
+    ic_op  = Ic_tape(b0, theta)              
+    ic_abs = ic_op * (w_tape_mm * 1e-3)      
+    je_op  = Je_tape(b0, theta, cu_frac=cu_frac) # Pass variable here
+
 
     return {
         # Geometry

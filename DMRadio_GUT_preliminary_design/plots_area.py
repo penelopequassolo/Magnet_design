@@ -24,7 +24,7 @@ def _save(fig, name, label=""):
 
 
 def _setup_area_axes(ax, grids):
-    y = grids["rebco_pancake_length"]
+    y = grids["length_sc"]
     ax.set_xlabel("Inner radius  Ri  (mm)", fontsize=12)
     ax.set_ylabel("REBCO pancake length  L_SC  (m)", fontsize=12)
     ax.xaxis.set_major_formatter(ticker.FormatStrFormatter("%.0f"))
@@ -96,7 +96,22 @@ def _draw_background_b2v(fig, ax, x, y, b2v):
     cbar.set_label("B²V  (T²·m³)", fontsize=10, labelpad=4)
     cbar.ax.tick_params(labelsize=9, direction="in")
 
+def _draw_background_je_coil(fig, ax, x, y, je_coil):
+    lvl = ph.safe_levels(np.nanmin(je_coil), np.nanmax(je_coil), n=30)
+    cf = ax.contourf(x, y, je_coil, levels=lvl, cmap="plasma", alpha=0.8)
+    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                        pad=0.02, aspect=40, shrink=0.95)
+    cbar.set_label("Je_coil  (A/mm²)", fontsize=10, labelpad=4)
+    cbar.ax.tick_params(labelsize=9, direction="in")
 
+
+def _draw_background_je_sc(fig, ax, x, y, je_sc):
+    lvl = ph.safe_levels(np.nanmin(je_sc), np.nanmax(je_sc), n=30)
+    cf = ax.contourf(x, y, je_sc, levels=lvl, cmap="plasma", alpha=0.8)
+    cbar = fig.colorbar(cf, ax=ax, orientation="horizontal", location="top",
+                        pad=0.02, aspect=40, shrink=0.95)
+    cbar.set_label("Je_sc  (A/mm²)", fontsize=10, labelpad=4)
+    cbar.ax.tick_params(labelsize=9, direction="in")
 # ─────────────────────────────────────────────────────────────────────────────
 # Iso-contour overlays
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +163,43 @@ def _draw_scan_iso(ax, x, y, scan_masked):
                   inline=True, inline_spacing=4, colors="steelblue")
 
 
+def _draw_magnet_points(ax, solenoid_length_m, csv_path="magnet_characteristics.csv"):
+    try:
+        df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        print(f"  [!] Magnet CSV not found: {csv_path}")
+        return
+
+    df = df[np.isclose(df['solenoid_length_m'], solenoid_length_m)].copy()
+
+    if df.empty:
+        print(f"  [!] No magnet points for solenoid_length_m = {solenoid_length_m}")
+        return
+
+    marker_styles = {
+        1.0:  ('o', 'white'),
+        2.0:  ('s', 'white'),
+        3.0:  ('^', 'white'),
+        4.0:  ('D', 'white'),
+        5.0:  ('P', 'white'),
+        10.0: ('*', 'white'),
+    }
+
+    for conductor_l, group in df.groupby('conductor_length_m'):
+        marker, face = marker_styles.get(conductor_l, ('o', 'white'))
+        ax.scatter(
+            group['ri'] * 1e3,
+            group['length_sc'],
+            marker=marker,
+            s=80,
+            facecolors=face,
+            edgecolors='black',
+            linewidths=1.2,
+            zorder=10,
+            label=f'{conductor_l:g}m conductor',
+        )
+
+    ax.legend(fontsize=8, loc='upper right', framealpha=0.85, edgecolor='grey')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,9 +208,27 @@ def _draw_scan_iso(ax, x, y, scan_masked):
 
 def plot_all(grids, label, solenoid_length_m):
     x = grids["ri"] * 1e3
-    y = grids["rebco_pancake_length"]
+    
+    # Replicate the logic from io_grids.py to get single pancake length
+    try:
+        import solenoid_lib
+        w_tape_m = solenoid_lib.w_tape_mm * 1e-3
+    except (ImportError, AttributeError):
+        w_tape_m = 0.004
+        
+    num_pancakes = solenoid_length_m / w_tape_m
+    y = grids["length_sc"] / num_pancakes
+    
     suffix = ph.title_suffix_area()
     plot_combined_scan_log_contour(grids, x, y, suffix, label, solenoid_length_m)
+    plt.ylim(bottom=100, top=10000) 
+    plot_combined_je_sc_contour(grids, x, y, suffix, label, solenoid_length_m)
+    plt.ylim(bottom=100, top=10000) 
+    plot_combined_je_coil_contour(grids, x, y, suffix, label, solenoid_length_m)
+    plt.ylim(bottom=100, top=10000) 
+
+
+
 
 
 def plot_combined_scan_log(grids, x, y, suffix, label=""):
@@ -203,7 +273,7 @@ def plot_combined_scan_log_contour(grids, x, y, suffix, label="", solenoid_lengt
     _draw_scan_iso(ax, x, y, scan_masked)
     _draw_b0_iso(ax, x, y, grids["b0"])
     _draw_thickness_iso(ax, x, y, grids["th"])
-    # _draw_magnet_points(ax, solenoid_length_m)       # ← pass length
+    _draw_magnet_points(ax, solenoid_length_m)       # ← pass length
     _finish(ax, grids, suffix, "Scan time", "Scan time  (yr)", "steelblue")
     _save(fig, "contour_combined_Ascan_sc_filled", label)
 
@@ -216,3 +286,24 @@ def plot_combined_b2v_contour(grids, x, y, suffix, label=""):
         _draw_background_b2v(fig, ax, x, y, b2v)
         _draw_stress_iso(ax, x, y, grids["stress"])
         bv_min, bv_max = np.nanmin(b2v),
+
+def plot_combined_je_sc_contour(grids, x, y, suffix, label="", solenoid_length_m=1.0):
+    fig, ax = plt.subplots(figsize=(10, 7))
+    _draw_background_je_sc(fig, ax, x, y, grids["je_sc"])
+    _draw_stress_iso(ax, x, y, grids["stress"])
+    _draw_b0_iso(ax, x, y, grids["b0"])
+    _draw_thickness_iso(ax, x, y, grids["th"])
+    _draw_magnet_points(ax, solenoid_length_m)
+    _finish(ax, grids, suffix, "Je_sc", "Je_sc  (A/mm²)", "purple")
+    _save(fig, "contour_combined_Ascan_je_sc", label)
+
+
+def plot_combined_je_coil_contour(grids, x, y, suffix, label="", solenoid_length_m=1.0):
+    fig, ax = plt.subplots(figsize=(10, 7))
+    _draw_background_je_coil(fig, ax, x, y, grids["je_coil"])
+    _draw_stress_iso(ax, x, y, grids["stress"])
+    _draw_b0_iso(ax, x, y, grids["b0"])
+    _draw_thickness_iso(ax, x, y, grids["th"])
+    _draw_magnet_points(ax, solenoid_length_m)
+    _finish(ax, grids, suffix, "Je_coil", "Je_coil  (A/mm²)", "purple")
+    _save(fig, "contour_combined_Ascan_je_coil", label)
