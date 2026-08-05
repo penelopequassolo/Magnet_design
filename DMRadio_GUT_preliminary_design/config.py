@@ -14,14 +14,14 @@ SIGMA_LIMIT_PA  = 750e6   # [Pa]  hoop stress threshold for Je derating
 STRESS_DERATING = 0.80    # [—]   derating factor when stress exceeds limit
 
 # ── Grid: Ri vs Th ───────────────────────────────────────────────────────────
-N_RI = 100
-N_TH = 100
+N_RI = 150
+N_TH = 150
 RI_MIN, RI_MAX = 0.010, 1.500   # m   (100 mm  → 1500 mm)
 TH_MIN, TH_MAX = 0.002, 0.400   # m   (2 mm  →  400 mm)
 
 # ── Grid: Ri vs A (conductor cross-section) ──────────────────────────────────
-N_RI_A = 100
-N_A    = 100
+N_RI_A = 150
+N_A    = 150
 A_MIN = np.pi * ((RI_MAX + TH_MIN)**2 - RI_MAX**2)  # smallest Th at largest Ri
 A_MAX = np.pi * ((RI_MAX + TH_MAX)**2 - RI_MAX**2)  # largest Th at largest Ri
 TH_MAX_LIMIT = None             # m   max coil thickness mask (None disables)
@@ -53,3 +53,9 @@ ROUND_A  = None         # [m²]
 
 # Build the A axis from a graded Th axis taken at RI_MAX.
 A_AXIS_FROM_TH = True
+
+# Which end of each axis gets the fine spacing ("min" or "max").
+# Irrelevant when the corresponding P_* is 1.0 (uniform).
+FINE_AT_RI = "max"      # dense at the OUTER radius, steps shrink with Ri
+FINE_AT_TH = "min"      # dense at the thin end, unchanged
+FINE_AT_A  = "min"      # only used when A_AXIS_FROM_TH is False

@@ -1,8 +1,11 @@
 # grid.py
 # ─────────────────────────────────────────────────────────────────────────────
-# Build power-law graded meshgrids (p = 2 by default, fine at the thin end)
-# and run the self-consistent EM + mechanical solver with material-fraction
-# feedback.
+# Build power-law graded meshgrids and run the self-consistent EM + mechanical
+# solver with material-fraction feedback.
+#
+# Each axis can be graded fine at its low end (fine_at="min", steps grow with
+# the value) or fine at its high end (fine_at="max", steps shrink with the
+# value). p = 1 is uniform and fine_at is then irrelevant.
 # ─────────────────────────────────────────────────────────────────────────────
 import importlib
 import numpy as np
@@ -24,21 +27,53 @@ PROGRESS_EVERY = 25          # cells between progress prints
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 0.  Config access with fallbacks
+# ═════════════════════════════════════════════════════════════════════════════
+# Defaults used when config.py predates a given option. FINE_AT_* default to
+# "min", which is the historical behaviour, so an old config still reproduces
+# the old axes exactly.
+_DEFAULTS = {
+    "P_RI": 1.0, "P_TH": 2.0, "P_A": 2.0,
+    "D0_RI": None, "D0_TH": None, "D0_A": None,
+    "ROUND_RI": None, "ROUND_TH": None, "ROUND_A": None,
+    "A_AXIS_FROM_TH": True,
+    "FINE_AT_RI": "min", "FINE_AT_TH": "min", "FINE_AT_A": "min",
+}
+
+_warned = set()
+
+
+def _cfg(name):
+    """config.<name>, falling back to a default with a one-time warning."""
+    if hasattr(config, name):
+        return getattr(config, name)
+    if name not in _warned:
+        _warned.add(name)
+        print(f"[!] config.{name} missing — using default {_DEFAULTS[name]!r}")
+    return _DEFAULTS[name]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # 1.  Axis construction
 # ═════════════════════════════════════════════════════════════════════════════
-def power_axis(vmin, vmax, n=None, p=1.0, d0=None, round_to=None):
+def power_axis(vmin, vmax, n=None, p=1.0, d0=None, round_to=None, fine_at="min"):
     """
-    Graded 1-D axis, finest at vmin:
+    Graded 1-D axis. Endpoints are always exact.
 
-        v_k = vmin + (vmax - vmin) * (k / (n-1))**p ,    k = 0 .. n-1
+        fine_at="min":  v_k = vmin + span * (k/(n-1))**p        steps grow
+        fine_at="max":  v_k = vmax - span * (1 - k/(n-1))**p    steps shrink
 
-    p = 1 is exactly np.linspace. Give either n, or d0 (the desired first
-    step) and n is derived from it. Endpoints are always exact.
+    p = 1 is exactly np.linspace in both cases. Give either n, or d0 = the
+    SMALLEST step, from which n is derived:  n = 1 + (span/d0)**(1/p).
+    Note that the smallest step sits at vmin for fine_at="min" and at vmax
+    for fine_at="max", so the meaning of d0 follows the grading direction.
     """
     if p <= 0:
         raise ValueError("p must be > 0")
     if vmax <= vmin:
         raise ValueError("vmax must exceed vmin")
+    if fine_at not in ("min", "max"):
+        raise ValueError(f"fine_at must be 'min' or 'max', got {fine_at!r}")
     span = vmax - vmin
 
     if d0 is not None:
@@ -47,11 +82,17 @@ def power_axis(vmin, vmax, n=None, p=1.0, d0=None, round_to=None):
         raise ValueError("need n >= 2 (or a sensible d0)")
 
     u = np.linspace(0.0, 1.0, n)
-    v = vmin + span * u ** p
+    if fine_at == "min":
+        v = vmin + span * u ** p
+    else:
+        v = vmax - span * (1.0 - u) ** p
     v[0], v[-1] = vmin, vmax                      # kill float drift
 
     if round_to:
         v = np.unique(np.round(v / round_to) * round_to)
+        if len(v) < n:
+            print(f"[!] round_to={round_to:g} merged {n - len(v)} of {n} points "
+                  f"(finest step {span / (n - 1) ** p:.3g} < round_to)")
     return v
 
 
@@ -63,26 +104,32 @@ def cell_edges(v):
 
 
 def _axis_report(name, v, unit=1.0, unit_name=""):
+    """First and last step in axis order — direction matters once graded."""
     d = np.diff(v)
+    trend = "coarsening" if d[-1] > d[0] else ("refining" if d[-1] < d[0]
+                                               else "uniform")
     print(f"  {name:<12}: {len(v):3d} pts, "
           f"{v[0]*unit:.3f} – {v[-1]*unit:.3f} {unit_name}, "
-          f"step {d.min()*unit:.3f} → {d.max()*unit:.3f} {unit_name} "
+          f"step {d[0]*unit:.3f} → {d[-1]*unit:.3f} {unit_name} ({trend}) "
           f"(uniform would be {(v[-1]-v[0])/(len(v)-1)*unit:.3f})")
 
 
 def make_ri_axis():
     return power_axis(config.RI_MIN, config.RI_MAX, n=config.N_RI,
-                      p=config.P_RI, d0=config.D0_RI, round_to=config.ROUND_RI)
+                      p=_cfg("P_RI"), d0=_cfg("D0_RI"),
+                      round_to=_cfg("ROUND_RI"), fine_at=_cfg("FINE_AT_RI"))
 
 
 def make_ri_a_axis():
     return power_axis(config.RI_MIN, config.RI_MAX, n=config.N_RI_A,
-                      p=config.P_RI, d0=config.D0_RI, round_to=config.ROUND_RI)
+                      p=_cfg("P_RI"), d0=_cfg("D0_RI"),
+                      round_to=_cfg("ROUND_RI"), fine_at=_cfg("FINE_AT_RI"))
 
 
 def make_th_axis():
     return power_axis(config.TH_MIN, config.TH_MAX, n=config.N_TH,
-                      p=config.P_TH, d0=config.D0_TH, round_to=config.ROUND_TH)
+                      p=_cfg("P_TH"), d0=_cfg("D0_TH"),
+                      round_to=_cfg("ROUND_TH"), fine_at=_cfg("FINE_AT_TH"))
 
 
 def make_a_axis():
@@ -92,19 +139,27 @@ def make_a_axis():
     convention used for A_MIN / A_MAX in config.py. This guarantees the same
     thickness resolution as the Th scan at the reference radius; grading A
     directly with p = 2 only approximates it, because Th(A) is concave.
+
+    In the derived branch the grading follows FINE_AT_TH, not FINE_AT_A: the
+    axis IS a thickness axis, just relabelled. FINE_AT_A applies only when
+    A is graded directly.
     """
-    if getattr(config, "A_AXIS_FROM_TH", False):
+    if _cfg("A_AXIS_FROM_TH"):
         ri_ref = config.RI_MAX
         th = power_axis(config.TH_MIN, config.TH_MAX, n=config.N_A,
-                        p=config.P_TH, d0=config.D0_TH, round_to=config.ROUND_TH)
+                        p=_cfg("P_TH"), d0=_cfg("D0_TH"),
+                        round_to=_cfg("ROUND_TH"), fine_at=_cfg("FINE_AT_TH"))
         return np.pi * ((ri_ref + th) ** 2 - ri_ref ** 2)
     return power_axis(config.A_MIN, config.A_MAX, n=config.N_A,
-                      p=config.P_A, d0=config.D0_A, round_to=config.ROUND_A)
+                      p=_cfg("P_A"), d0=_cfg("D0_A"),
+                      round_to=_cfg("ROUND_A"), fine_at=_cfg("FINE_AT_A"))
 
 
 def preview_axes():
     """Print the axes without running any physics — cheap sanity check."""
     print("Graded axes:")
+    print(f"  grading: Ri p={_cfg('P_RI')} fine at {_cfg('FINE_AT_RI')}, "
+          f"Th p={_cfg('P_TH')} fine at {_cfg('FINE_AT_TH')}")
     _axis_report("Ri (Th-scan)", make_ri_axis(), 1e3, "mm")
     _axis_report("Th", make_th_axis(), 1e3, "mm")
     _axis_report("Ri (A-scan)", make_ri_a_axis(), 1e3, "mm")
@@ -379,10 +434,11 @@ if __name__ == "__main__":
             A_MIN = np.pi * ((RI_MAX + TH_MIN) ** 2 - RI_MAX ** 2)
             A_MAX = np.pi * ((RI_MAX + TH_MAX) ** 2 - RI_MAX ** 2)
             TH_MAX_LIMIT = None
-            P_RI, P_TH, P_A = 1.0, 2.0, 2.0
+            P_RI, P_TH, P_A = 2.0, 2.0, 2.0
             D0_RI = D0_TH = D0_A = None
             ROUND_RI = ROUND_TH = ROUND_A = None
             A_AXIS_FROM_TH = True
+            FINE_AT_RI, FINE_AT_TH, FINE_AT_A = "max", "min", "min"
             MAX_ITER, TOL_REL = 50, 1e-4
             SIGMA_LIMIT_PA = 750e6
 
@@ -423,11 +479,19 @@ if __name__ == "__main__":
 
     print("\n--- Test validations ---")
     th = g_th["th_vals"]
-    print(f"Th first/last step : {np.diff(th)[0]*1e3:.3f} / "
-          f"{np.diff(th)[-1]*1e3:.3f} mm  (ratio {np.diff(th)[-1]/np.diff(th)[0]:.1f})")
-    print(f"Th axis monotonic  : {bool(np.all(np.diff(th) > 0))}")
+    ri = g_th["ri_vals"]
+    d_th, d_ri = np.diff(th), np.diff(ri)
+    print(f"Th first/last step : {d_th[0]*1e3:.3f} / {d_th[-1]*1e3:.3f} mm  "
+          f"(ratio {d_th[-1]/d_th[0]:.1f})")
+    print(f"Ri first/last step : {d_ri[0]*1e3:.3f} / {d_ri[-1]*1e3:.3f} mm  "
+          f"(ratio {d_ri[-1]/d_ri[0]:.2f})")
+    want = {"min": True, "max": False}[_cfg("FINE_AT_RI")]
+    print(f"Ri grading matches : {bool(d_ri[-1] > d_ri[0]) == want or _cfg('P_RI') == 1}")
+    print(f"Axes monotonic     : {bool(np.all(d_th > 0))} / {bool(np.all(d_ri > 0))}")
     print(f"Endpoints exact    : {np.isclose(th[0], config.TH_MIN)} / "
           f"{np.isclose(th[-1], config.TH_MAX)}")
+    print(f"Ri endpoints exact : {np.isclose(ri[0], config.RI_MIN)} / "
+          f"{np.isclose(ri[-1], config.RI_MAX)}")
     print(f"Edges bracket axis : {cell_edges(th)[0] < th[0]} / "
           f"{cell_edges(th)[-1] > th[-1]}")
     print(f"Max f_sc           : {np.nanmax(g_th['f_sc'])*100:.2f} %")
