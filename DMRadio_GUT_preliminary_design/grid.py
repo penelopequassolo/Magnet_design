@@ -1,11 +1,15 @@
 # grid.py
 # ─────────────────────────────────────────────────────────────────────────────
 # Build power-law graded meshgrids and run the self-consistent EM + mechanical
-# solver with material-fraction feedback.
+# solver with tape-fraction feedback.
 #
 # Each axis can be graded fine at its low end (fine_at="min", steps grow with
 # the value) or fine at its high end (fine_at="max", steps shrink with the
 # value). p = 1 is uniform and fine_at is then irrelevant.
+#
+# Naming: every current density ending in _mm2 that describes the tape is per
+# mm² of FULL tape cross-section (w_tape × t_tape), not per mm² of REBCO.
+# f_tape_min is therefore the minimum tape fraction of the winding pack.
 # ─────────────────────────────────────────────────────────────────────────────
 import importlib
 import numpy as np
@@ -173,18 +177,17 @@ def _empty_result_grids(shape):
     """Create the standard set of NaN-initialised output grids."""
     nan = lambda: np.full(shape, np.nan)
     return {
-        "b0":        nan(),
-        "v_bore":    nan(),
-        "scan":      nan(),
-        "stress":    nan(),
-        "j_crit":    nan(),
-        "je_max":    nan(),
-        "je_coil":   nan(),       # Overall Coil Engineering Je
-        "je_sc":     nan(),       # Current density isolated to the SC tape
-        "f_sc":      nan(),       # Superconductor volume fraction
-        "length_sc": nan(),       # Exact physical length of SC tape
-        "margin":    nan(),
-        "converged": np.zeros(shape, dtype=bool),
+        "b0":          nan(),
+        "v_bore":      nan(),
+        "scan":        nan(),
+        "stress":      nan(),
+        "j_crit":      nan(),   # Jc of the tape at the local B0, per mm² of tape
+        "je_max":      nan(),   # Je the tape can carry at the local B0
+        "je_coil":     nan(),   # Je averaged over the whole winding pack
+        "je_tape":     nan(),   # Je in the tape itself (pack Je / tape fraction)
+        "f_tape_min":  nan(),   # minimum tape fraction of the winding pack
+        "length_tape": nan(),   # physical length of tape in the pack
+        "converged":   np.zeros(shape, dtype=bool),
     }
 
 
@@ -192,46 +195,43 @@ def _empty_result_grids(shape):
 # 3.  Per-cell solver
 # ═════════════════════════════════════════════════════════════════════════════
 def _tape_props(b0):
-    """Je_tape with the cu_frac keyword when the library supports it."""
-    try:
-        return solenoid_lib.Je_tape(b0, solenoid_lib.theta_solenoid, cu_frac=0.5)
-    except TypeError:
-        return solenoid_lib.Je_tape(b0, solenoid_lib.theta_solenoid)
+    """(Jc, Je_max) of the tape at the on-axis field, per mm² of tape cross-section."""
+    return solenoid_lib.Je_tape(b0, solenoid_lib.theta_solenoid)
 
 
 def _solve_cell(ri, rf, v, je_mech_mm2):
     """Self-consistent equilibrium solver (unchanged physics)."""
     je_mm2 = je_mech_mm2
     converged = False
-    f_sc = 1.0
+    f_tape = 1.0
 
     # Pre-seed so the post-loop block is always well defined (MAX_ITER = 0,
     # early exits, ...) — this was a latent NameError in the previous version.
     b0 = solenoid_lib.solenoid_field_center(ri, rf, je_mm2 * 1e6,
                                             solenoid_lib.solenoid_length)
-    jc_100sc_mm2, je_100sc_mm2 = _tape_props(b0)
-    je_100sc_mm2 = max(je_100sc_mm2, 1e-6)
+    jc_tape_mm2, je_tape_mm2 = _tape_props(b0)
+    je_tape_mm2 = max(je_tape_mm2, 1e-6)
 
     for _ in range(config.MAX_ITER):
         je_si = je_mm2 * 1e6
         b0 = solenoid_lib.solenoid_field_center(ri, rf, je_si,
                                                 solenoid_lib.solenoid_length)
 
-        jc_100sc_mm2, je_100sc_mm2 = _tape_props(b0)
-        je_100sc_mm2 = max(je_100sc_mm2, 1e-6)
+        jc_tape_mm2, je_tape_mm2 = _tape_props(b0)
+        je_tape_mm2 = max(je_tape_mm2, 1e-6)
 
-        # Minimum REBCO fraction needed to carry je_mm2
-        f_sc = je_mm2 / je_100sc_mm2
+        # Tape fraction of the pack needed to carry je_mm2
+        f_tape = je_mm2 / je_tape_mm2
 
-        if f_sc <= 1.0:
+        if f_tape <= 1.0:
             converged = True                     # mechanically limited
             break
 
-        je_new_mm2 = je_100sc_mm2                # EM limited: drop to tape limit
+        je_new_mm2 = je_tape_mm2                 # EM limited: drop to tape limit
         rel_change = abs(je_new_mm2 - je_mm2) / (abs(je_mm2) + 1e-12)
         je_mm2 = je_new_mm2
         if rel_change < config.TOL_REL:
-            f_sc = 1.0
+            f_tape = 1.0
             converged = True
             break
 
@@ -243,27 +243,26 @@ def _solve_cell(ri, rf, v, je_mech_mm2):
                                            solenoid_lib.solenoid_length)
 
     if RECOMPUTE_TAPE_AT_EXIT:
-        jc_100sc_mm2, je_100sc_mm2 = _tape_props(b0)
-        je_100sc_mm2 = max(je_100sc_mm2, 1e-6)
-        f_sc = min(je_mm2 / je_100sc_mm2, 1.0)
+        jc_tape_mm2, je_tape_mm2 = _tape_props(b0)
+        je_tape_mm2 = max(je_tape_mm2, 1e-6)
+        f_tape = min(je_mm2 / je_tape_mm2, 1.0)
 
-    j_sc_mm2 = je_mm2 / f_sc if f_sc > 0 else 0.0
+    j_tape_mm2 = je_mm2 / f_tape if f_tape > 0 else 0.0
 
     scan = (solenoid_lib.scan_time(b0, v)
             if hasattr(solenoid_lib, "scan_time") else b0 ** 2 * v)
 
     return {
-        "b0":        b0,
-        "v_bore":    v,
-        "scan":      scan,
-        "stress":    sigma_pa / 1e6,
-        "j_crit":    jc_100sc_mm2,
-        "je_max":    je_100sc_mm2,
-        "je_coil":   je_mm2,
-        "je_sc":     j_sc_mm2,
-        "f_sc":      f_sc,
-        "margin":    jc_100sc_mm2 / j_sc_mm2 if j_sc_mm2 > 0 else np.nan,
-        "converged": converged,
+        "b0":         b0,
+        "v_bore":     v,
+        "scan":       scan,
+        "stress":     sigma_pa / 1e6,
+        "j_crit":     jc_tape_mm2,
+        "je_max":     je_tape_mm2,
+        "je_coil":    je_mm2,
+        "je_tape":    j_tape_mm2,
+        "f_tape_min": f_tape,
+        "converged":  converged,
     }
 
 
@@ -310,9 +309,10 @@ def _run_scan(ri, th, valid, label):
                     if key in res:
                         res[key][i, j] = val
 
-                # 3. material fraction -> exact SC tape length
+                # 3. tape fraction -> physical tape length
                 v_pack = a_total[i, j] * solenoid_lib.solenoid_length
-                res["length_sc"][i, j] = v_pack * cell["f_sc"] / tape_cs_m2
+                res["length_tape"][i, j] = (v_pack * cell["f_tape_min"]
+                                            / tape_cs_m2)
 
             except (ValueError, RuntimeError) as err:
                 n_err += 1
@@ -353,8 +353,9 @@ def build_thickness_grid():
              "ri_edges": cell_edges(ri_vals), "th_edges": cell_edges(th_vals),
              **res}
     _print_summary(grids, ri.size, label="Th",
-                   extra={"Th (mm)": th * 1e3, "f_sc (%)": res["f_sc"] * 100,
-                          "Len SC (km)": res["length_sc"] / 1000})
+                   extra={"Th (mm)": th * 1e3,
+                          "f_tape_min (%)": res["f_tape_min"] * 100,
+                          "Len tape (km)": res["length_tape"] / 1000})
     return grids
 
 
@@ -392,8 +393,8 @@ def build_area_grid():
     _print_summary(grids, ri.size, label="A",
                    extra={"A_total (mm²)": a_total * 1e6,
                           "Th (mm)": np.where(valid, th, np.nan) * 1e3,
-                          "f_sc (%)": res["f_sc"] * 100,
-                          "Len SC (km)": res["length_sc"] / 1000})
+                          "f_tape_min (%)": res["f_tape_min"] * 100,
+                          "Len tape (km)": res["length_tape"] / 1000})
     return grids
 
 
@@ -494,6 +495,6 @@ if __name__ == "__main__":
           f"{np.isclose(ri[-1], config.RI_MAX)}")
     print(f"Edges bracket axis : {cell_edges(th)[0] < th[0]} / "
           f"{cell_edges(th)[-1] > th[-1]}")
-    print(f"Max f_sc           : {np.nanmax(g_th['f_sc'])*100:.2f} %")
-    print(f"Min SC length      : {np.nanmin(g_th['length_sc'])/1000:.2f} km")
+    print(f"Max f_tape_min     : {np.nanmax(g_th['f_tape_min'])*100:.2f} %")
+    print(f"Min tape length    : {np.nanmin(g_th['length_tape'])/1000:.2f} km")
     print("Test passed.")

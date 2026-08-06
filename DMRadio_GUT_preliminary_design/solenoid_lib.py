@@ -92,7 +92,7 @@ def Ic_tape(b: float, theta: float) -> float:
     )
 
 
-def Je_tape(b: float, theta: float, cu_frac: float = 0.8) -> tuple[float, float]:
+def Je_tape(b: float, theta: float) -> tuple[float, float]:
     """
     Engineering current density [A/mm²] at field b and angle theta,
     derated by margin.
@@ -101,19 +101,16 @@ def Je_tape(b: float, theta: float, cu_frac: float = 0.8) -> tuple[float, float]
     ----------
     b       : field magnitude [T]
     theta   : field angle [rad] w.r.t. c-axis
-    cu_frac : copper fraction of the tape cross-section (default 0.8)
 
     Returns
     -------
     jc_tape_mm2 : critical current density [A/mm²]
     je_max      : engineering current density [A/mm²]
     """
-    # Calculate ratio dynamically based on the passed copper fraction
-    cu_sc_ratio = 1.0 / (1.0 - cu_frac)  # [—] ratio of total tape cross-section to SC layer cross-section
     
     ic          = Ic_tape(b, theta)                   # [A]      for tape of width w_tape_mm
     ic_w        = ic / w_tape_mm                      # [A/mm]   per mm of tape width
-    jc_tape_mm2 = (ic_w / t_tape_mm) / cu_sc_ratio    # [A/mm²]  over full tape cross-section
+    jc_tape_mm2 = (ic_w / t_tape_mm)     # [A/mm²]  over full tape cross-section
     je_max      = jc_tape_mm2 * margin                # [A/mm²]  derated by margin
 
     return jc_tape_mm2, je_max
@@ -307,8 +304,7 @@ def hoop_stress(ri: float, rf: float,
 def solenoid_summary(ri: float, rf: float,
                      j: float = je_nominal,
                      l: float = solenoid_length,
-                     theta: float = theta_solenoid,
-                     cu_frac: float = 0.8) -> dict:
+                     theta: float = theta_solenoid,) -> dict:
     """
     Collect all key solenoid outputs at a fixed engineering Je = j.
 
@@ -325,7 +321,7 @@ def solenoid_summary(ri: float, rf: float,
     # Ic and Je at operating field
     ic_op  = Ic_tape(b0, theta)              
     ic_abs = ic_op * (w_tape_mm * 1e-3)      
-    je_op  = Je_tape(b0, theta, cu_frac=cu_frac) # Pass variable here
+    je_op  = Je_tape(b0, theta) # Pass variable here
 
 
     return {
