@@ -29,7 +29,7 @@ je_nominal      = 630e6    # [A/m²]  tape engineering Je (630 A/mm²)
 # ─────────────────────────────────────────────────────────────────────────────
 # REBCO tape geometry
 # ─────────────────────────────────────────────────────────────────────────────
-t_tape_mm = 0.15     # Total tape thickness [mm]
+t_tape_mm = 0.1     # Total tape thickness [mm]
 t_sc_mm   = 0.002   # SC layer thickness   [mm]  (2 µm)
 w_tape_mm = 4.0     # Tape width           [mm]
 
