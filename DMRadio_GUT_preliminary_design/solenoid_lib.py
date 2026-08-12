@@ -523,6 +523,294 @@ def solenoid_summary(ri: float, rf: float,
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 5.  Winding-pack design point — hoop stress + quench protection
+# ─────────────────────────────────────────────────────────────────────────────
+# The operating point of a fixed pack (Ri, Th, L) is the largest packing
+# current density Je that simultaneously satisfies
+#
+#     tape        : I_turn <= I_c(B0)                (via f_tape <= f_built)
+#     mechanics   : sigma_hoop / f_struct <= u_target * sigma_limit
+#     packing     : f_tape_built + f_Cu_cowound <= fill_target
+#
+# Copper carries no load, so protection and mechanics compete for the SAME
+# radial build: every % of Th given to stabiliser is a % that cannot react the
+# Lorentz load.  Every residual is monotone increasing in Je (the ceil() jumps
+# at each new layer raise f_built AND tau, so they also go up), hence the
+# feasible set is the interval (0, Je*] and Je* is found by bisection — no
+# secant, no relaxation factor, no tolerance tuning.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from dataclasses import dataclass, asdict
+
+RHO_CU = 8960.0          # [kg/m3]
+
+
+@dataclass(frozen=True)
+class DesignParams:
+    sigma_limit: float = 750e6      # hoop limit of the structure          [Pa]
+    u_target:    float = 0.995      # structural utilisation to sit at     [-]
+    fill_target: float = 0.98       # tape + co-wound Cu packing ceiling   [-]
+    fCu:         float = 0.50       # copper fraction of the tape itself   [-]
+    gamma_cu:    float = 5.0e16     # copper action limit at the hot spot  [A2 s m-4]
+    sf_quench:   float = 1.00       # safety factor on required Cu area    [-]
+    topology:    str   = "isolated"   # "series" | "isolated"
+    dump_mode:   str   = "resistance"
+    R_EE:        float = 4.0        # dump resistance                      [ohm]
+
+    @property
+    def gamma_max(self) -> float:
+        """Action limit referred to the copper cross-section [A2 s m-4]."""
+        return self.gamma_cu * self.fCu
+
+    def as_dict(self) -> dict:
+        d = asdict(self)
+        d["gamma_max"] = self.gamma_max
+        return d
+
+
+DEFAULT_DESIGN = DesignParams()
+
+# binding-constraint labels, kept in one place so grids/plots agree
+BINDING_CODES = {"mechanical": 0, "packing": 1, "EM/tape": 2, "none": 3}
+
+
+# ── geometry helpers ─────────────────────────────────────────────────────────
+def quantize_length(l_req: float) -> Tuple[float, int]:
+    """
+    Axial pitch is the tape width, so the length quantises exactly.
+
+    Returns (l_built, n_pancakes).
+    """
+    w = w_tape_mm * 1e-3
+    n_pc = max(1, int(round(l_req / w)))
+    return n_pc * w, n_pc
+
+
+def pack_coefficients(ri: float, rf: float,
+                      l: float = None,
+                      quantize: bool = True) -> dict:
+    """
+    Power-law coefficients of the pack, evaluated ONCE per geometry.
+
+        B0    = k_b * Je          (exact, Biot-Savart is linear in Je)
+        sigma = k_s * Je^2        (Wilson: S ~ j*B1*ri and B1 ~ j)
+        E     = k_e * Je^2        (Lorenz-Lontai)
+        E_pc  = k_e_pc * Je^2     (one pancake, length = w_tape)
+
+    Everything downstream is algebra on these four numbers, so the expensive
+    library calls happen three times per cell instead of once per iteration.
+    """
+    if l is None:
+        l = solenoid_length
+    if l is None:
+        raise ValueError("coil length is undefined (solenoid_lib.solenoid_length "
+                         "is None and no l was given)")
+    if ri >= rf:
+        raise ValueError("ri must be < rf.")
+
+    if quantize:
+        l, n_pc = quantize_length(l)
+    else:
+        n_pc = max(1, int(round(l / (w_tape_mm * 1e-3))))
+
+    je_ref = 1e8
+    k_b    = solenoid_field_center(ri, rf, je_ref, l) / je_ref
+    k_s    = hoop_stress(ri, rf, je_ref, l)[0] / je_ref ** 2
+    k_e    = magnetic_energy(ri, rf, je_ref, l) / je_ref ** 2
+    k_e_pc = magnetic_energy(ri, rf, je_ref, w_tape_mm * 1e-3) / je_ref ** 2
+
+    th = rf - ri
+    return {
+        "ri": ri, "rf": rf, "th": th, "l": l, "n_pc": n_pc,
+        "a_wind":  th * l,
+        "v_build": np.pi * (rf ** 2 - ri ** 2) * l,
+        "k_b": k_b, "k_s": k_s, "k_e": k_e, "k_e_pc": k_e_pc,
+    }
+
+
+def je_stress_only(coef: dict, par: DesignParams = DEFAULT_DESIGN,
+                   u: float = 1.0) -> float:
+    """
+    Stress-limited Je with NO copper [A/m2] — identical to
+    je_max_stress_limited(), but free because k_s is already known.
+    Use u = par.u_target for the derated value.
+    """
+    return np.sqrt(u * par.sigma_limit / coef["k_s"])
+
+
+def je_hoop_quench_closed_form(coef: dict, tau_ee: float,
+                               par: DesignParams = DEFAULT_DESIGN) -> float:
+    """
+    Exact hoop+quench limit [A/m2] at a FROZEN turn count, where tau is a
+    constant (L = 2E/I0^2 is pure geometry, Je cancels):
+
+        util = k_s Je^2 / ((1 - a Je) u sigma_lim) = 1,   a = sf sqrt(tau/2 gamma_max)
+        =>   b Je^2 + a Je - 1 = 0,                       b = k_s / (u sigma_lim)
+
+    a = 0 returns je_stress_only(), which is the sanity check.
+    """
+    a = par.sf_quench * np.sqrt(0.5 * tau_ee / par.gamma_max)
+    b = coef["k_s"] / (par.u_target * par.sigma_limit)
+    return (-a + np.sqrt(a * a + 4.0 * b)) / (2.0 * b)
+
+
+# ── the model: one pure function, everything derived ─────────────────────────
+def evaluate_design(coef: dict, je_mm2: float,
+                    par: DesignParams = DEFAULT_DESIGN) -> dict:
+    """Complete state of the pack at packing current density je_mm2 [A/mm2]."""
+    d  = {"je": je_mm2}
+    je = je_mm2 * 1e6
+
+    th, l, n_pc = coef["th"], coef["l"], coef["n_pc"]
+    a_wind = coef["a_wind"]
+
+    # ── EM ───────────────────────────────────────────────────────────────
+    b0       = coef["k_b"] * je
+    sigma_pa = coef["k_s"] * je ** 2
+    jc_tape_mm2, je_tape_mm2 = Je_tape(b0, theta_solenoid)
+    d.update(b0=b0, sigma_pa=sigma_pa, jc_tape=jc_tape_mm2, je_tape=je_tape_mm2)
+
+    if not np.isfinite(je_tape_mm2) or je_tape_mm2 <= 0.0:
+        d.update(r=np.inf, binding="EM/tape", feasible=False)
+        return d                                    # tape carries nothing here
+
+    # ── winding layout: integer turns, rounded up, pack is never short ───
+    t_tape = t_tape_mm * 1e-3
+    a_tape = t_tape * (w_tape_mm * 1e-3)
+    f_tape  = je_mm2 / je_tape_mm2                  # minimum tape fraction
+    n_tp    = max(1, int(np.ceil(f_tape * th / t_tape)))
+    n_tot   = n_tp * n_pc
+    f_built = n_tot * a_tape / a_wind               # = n_tp * t_tape / th
+    pitch   = th / n_tp
+    i0      = je * a_wind / n_tot                   # current per tape [A]
+    i_max   = je_tape_mm2 * t_tape_mm * w_tape_mm   # tape limit at B0 [A]
+    d.update(f_tape=f_tape, n_tp=n_tp, n_tot=n_tot, f_built=f_built,
+             pitch=pitch, i0=i0, i_max=i_max, i_margin=i_max / i0,
+             len_tape=n_tot * np.pi * (coef["ri"] + coef["rf"]))
+
+    # ── inductance from the stored energy ────────────────────────────────
+    em_tot = coef["k_e"]    * je ** 2
+    em_iso = coef["k_e_pc"] * je ** 2
+    l_tot  = 2.0 * em_tot / i0 ** 2                 # Je cancels: geometry x N^2
+    l_iso  = 2.0 * em_iso / i0 ** 2
+
+    # "isolated": one resistor per pancake, the dump sees l_iso only.
+    # "series"  : one resistor for the stack, the dump sees l_tot.
+    isolated = par.topology == "isolated"
+    l_dump, em_dump = (l_iso, em_iso) if isolated else (l_tot, em_tot)
+
+    # ── dump circuit ─────────────────────────────────────────────────────
+    r_ee   = par.R_EE
+    tau_ee = l_dump / r_ee
+    d.update(em_tot=em_tot, em_iso=em_iso, em_dump=em_dump,
+             l_tot=l_tot, l_iso=l_iso, l_dump=l_dump,
+             r_ee=r_ee, tau_ee=tau_ee, u_ee=r_ee * i0)
+
+    # ── hot spot, adiabatic: exponential dump only ───────────────────────
+    # per turn ql = i0^2 tau/2 = E/R.  Smeared over the build j_cu = Je/f_Cu,
+    # so the turn count cancels and only tau matters.
+    ql_dump   = 0.5 * i0 ** 2 * tau_ee
+    with np.errstate(invalid='ignore', divide='ignore'):
+        j_cu_max = np.sqrt(par.gamma_max / (0.5 * tau_ee))
+    f_cu_req  = par.sf_quench * je / j_cu_max       # total Cu fraction of build
+    f_cu_have = f_built * par.fCu                   # Cu already inside the tape
+    f_cu_add  = max(f_cu_req - f_cu_have, 0.0)      # co-wound Cu to add
+    f_cu_eff  = max(f_cu_req, f_cu_have)            # Cu actually in the build
+    s_cu      = f_cu_eff * a_wind / n_tot           # copper area per turn [m2]
+
+    d.update(ql_dump=ql_dump, j_cu_max=j_cu_max, f_cu_req=f_cu_req,
+             f_cu_have=f_cu_have, f_cu_add=f_cu_add, f_cu_eff=f_cu_eff,
+             s_cu=s_cu, j_cu=je / f_cu_eff,
+             gamma_op=(je / f_cu_eff) ** 2 * (0.5 * tau_ee),
+             m_cu=RHO_CU * f_cu_eff * coef["v_build"])
+
+    # ── mechanics: copper carries nothing, tape and filler are structure ─
+    # Ri, Th, L are fixed, so copper changes neither the Lorentz load nor
+    # sigma_hoop.  It changes what is left to carry it: th*(1 - f_Cu).
+    f_struct     = 1.0 - f_cu_eff
+    sigma_struct = sigma_pa / f_struct if f_struct > 0.0 else np.inf
+    fill         = f_built + f_cu_add
+    d.update(f_struct=f_struct, sigma_struct=sigma_struct, fill=fill,
+             util=sigma_struct / par.sigma_limit)
+
+    # ── binding constraint ───────────────────────────────────────────────
+    r_mech = d["util"] / par.u_target
+    r_fill = fill / par.fill_target
+    d["r"] = max(r_mech, r_fill)
+    d["binding"] = ("EM/tape" if f_tape > 1.0 else
+                    "mechanical" if r_mech >= r_fill else "packing")
+    d["feasible"] = d["r"] <= 1.0
+    return d
+
+
+def solve_design(ri: float = None, rf: float = None, l: float = None,
+                 par: DesignParams = DEFAULT_DESIGN,
+                 coef: dict = None,
+                 rtol: float = 1e-12,
+                 max_halve: int = 200):
+    """
+    Largest feasible Je, i.e. the highest field this pack can hold while
+    staying below the hoop limit AND remaining protectable.
+
+    Returns the full design dict (feasible, with 'coef', 'n_eval', 'je_seed',
+    'je_closed_form' attached) or None if no Je is feasible.
+    """
+    if coef is None:
+        coef = pack_coefficients(ri, rf, l)
+
+    n_ev = 0
+
+    def probe(x):
+        nonlocal n_ev
+        n_ev += 1
+        return evaluate_design(coef, x, par)
+
+    # upper bound: all of Th as structure, zero copper -> infeasible by
+    # construction, since any f_Cu > 0 pushes the utilisation past 1.
+    je_hi = je_stress_only(coef, par, u=1.0) / 1e6
+    d_hi  = probe(je_hi)
+    for _ in range(40):                       # guard: only if quench is free
+        if not d_hi["feasible"]:
+            break
+        je_hi *= 2.0
+        d_hi = probe(je_hi)
+
+    # lower bound: halve until it fits
+    je_lo, d_lo = None, None
+    je = je_hi
+    for _ in range(max_halve):
+        je *= 0.5
+        d = probe(je)
+        if d["feasible"]:
+            je_lo, d_lo = je, d
+            break
+        je_hi = je
+    if d_lo is None:
+        return None                           # infeasible for every Je
+
+    # bisection on a monotone predicate: ~50 evaluations, cannot fail
+    while je_hi - je_lo > rtol * je_lo:
+        je_mid = 0.5 * (je_lo + je_hi)
+        d = probe(je_mid)
+        if d["feasible"]:
+            je_lo, d_lo = je_mid, d
+        else:
+            je_hi = je_mid
+
+    d_lo["coef"]   = coef
+    d_lo["n_eval"] = n_ev
+    d_lo["je_seed"] = je_stress_only(coef, par, u=1.0) / 1e6      # no copper
+    d_lo["b0_seed"] = coef["k_b"] * d_lo["je_seed"] * 1e6
+    d_lo["je_closed_form"] = je_hoop_quench_closed_form(
+        coef, d_lo["tau_ee"], par) / 1e6      # exact when mechanics binds
+    return d_lo
+
+
+
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Axion model parameters
 # ─────────────────────────────────────────────────────────────────────────────
 

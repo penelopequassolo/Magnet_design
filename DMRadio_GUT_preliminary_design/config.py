@@ -14,14 +14,14 @@ SIGMA_LIMIT_PA  = 750e6   # [Pa]  hoop stress threshold for Je derating
 STRESS_DERATING = 0.80    # [—]   derating factor when stress exceeds limit
 
 # ── Grid: Ri vs Th ───────────────────────────────────────────────────────────
-N_RI = 150
-N_TH = 150
+N_RI = 100
+N_TH = 100
 RI_MIN, RI_MAX = 0.001, 1.500   # m   (100 mm  → 1500 mm)
 TH_MIN, TH_MAX = 0.002, 0.500   # m   (100 mm  →  400 mm)
 
 # ── Grid: Ri vs A (conductor cross-section) ──────────────────────────────────
-N_RI_A = 150
-N_A    = 150
+N_RI_A = 100
+N_A    = 100
 A_MIN = np.pi * ((RI_MAX + TH_MIN)**2 - RI_MAX**2)  # smallest Th at largest Ri
 A_MAX = np.pi * ((RI_MAX + TH_MAX)**2 - RI_MAX**2)  # largest Th at largest Ri
 TH_MAX_LIMIT = None             # m   max coil thickness mask (None disables)
