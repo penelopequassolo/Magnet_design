@@ -541,6 +541,7 @@ def solenoid_summary(ri: float, rf: float,
 # ─────────────────────────────────────────────────────────────────────────────
 
 from dataclasses import dataclass, asdict
+from typing import Optional
 
 RHO_CU = 8960.0          # [kg/m3]
 
@@ -548,14 +549,16 @@ RHO_CU = 8960.0          # [kg/m3]
 @dataclass(frozen=True)
 class DesignParams:
     sigma_limit: float = 750e6      # hoop limit of the structure          [Pa]
-    u_target:    float = 0.995      # structural utilisation to sit at     [-]
-    fill_target: float = 0.98       # tape + co-wound Cu packing ceiling   [-]
+    u_target:    float = 1      # structural utilisation to sit at     [-]
+    fill_target: float = 1      # tape + co-wound Cu packing ceiling   [-]
     fCu:         float = 0.50       # copper fraction of the tape itself   [-]
     gamma_cu:    float = 5.0e16     # copper action limit at the hot spot  [A2 s m-4]
     sf_quench:   float = 1.00       # safety factor on required Cu area    [-]
-    topology:    str   = "isolated"   # "series" | "isolated"
+    topology:    str   = "series" # "series" | "isolated"
     dump_mode:   str   = "resistance"
-    R_EE:        float = 4.0        # dump resistance                      [ohm]
+    U_EE:        float = 1000        # dump resistance                      [ohm]
+    n_par:       int   = 1          # tapes paralleled into one turn       [-]
+
 
     @property
     def gamma_max(self) -> float:
@@ -569,8 +572,6 @@ class DesignParams:
 
 
 DEFAULT_DESIGN = DesignParams()
-
-# binding-constraint labels, kept in one place so grids/plots agree
 BINDING_CODES = {"mechanical": 0, "packing": 1, "EM/tape": 2, "none": 3}
 
 
@@ -654,11 +655,22 @@ def je_hoop_quench_closed_form(coef: dict, tau_ee: float,
     return (-a + np.sqrt(a * a + 4.0 * b)) / (2.0 * b)
 
 
-# ── the model: one pure function, everything derived ─────────────────────────
+
 def evaluate_design(coef: dict, je_mm2: float,
                     par: DesignParams = DEFAULT_DESIGN) -> dict:
-    """Complete state of the pack at packing current density je_mm2 [A/mm2]."""
-    d  = {"je": je_mm2}
+    """
+    Complete state of the pack at packing current density je_mm2 [A/mm2].
+
+    Winding model: the radial build is filled with whole tapes; n_par of them
+    are stacked radially and paralleled into ONE electrical turn (a "bundle").
+    So the pack has n_bund turns per pancake carrying the terminal current i0,
+    and n_par*n_bund tapes per pancake each carrying i0/n_par.  Grouping tapes
+    leaves the stored energy untouched and multiplies i0 by n_par, so the
+    self-inductance falls as 1/n_par^2 and tau_EE with it — that, not the extra
+    conductor, is how n_par buys field.
+    """
+    n_par = max(1, int(par.n_par))
+    d  = {"je": je_mm2, "n_par": n_par}
     je = je_mm2 * 1e6
 
     th, l, n_pc = coef["th"], coef["l"], coef["n_pc"]
@@ -674,19 +686,34 @@ def evaluate_design(coef: dict, je_mm2: float,
         d.update(r=np.inf, binding="EM/tape", feasible=False)
         return d                                    # tape carries nothing here
 
-    # ── winding layout: integer turns, rounded up, pack is never short ───
+    # ── winding layout: integer tapes, integer bundles ───────────────────
     t_tape = t_tape_mm * 1e-3
     a_tape = t_tape * (w_tape_mm * 1e-3)
-    f_tape  = je_mm2 / je_tape_mm2                  # minimum tape fraction
-    n_tp    = max(1, int(np.ceil(f_tape * th / t_tape)))
-    n_tot   = n_tp * n_pc
-    f_built = n_tot * a_tape / a_wind               # = n_tp * t_tape / th
-    pitch   = th / n_tp
-    i0      = je * a_wind / n_tot                   # current per tape [A]
-    i_max   = je_tape_mm2 * t_tape_mm * w_tape_mm   # tape limit at B0 [A]
-    d.update(f_tape=f_tape, n_tp=n_tp, n_tot=n_tot, f_built=f_built,
-             pitch=pitch, i0=i0, i_max=i_max, i_margin=i_max / i0,
-             len_tape=n_tot * np.pi * (coef["ri"] + coef["rf"]))
+
+    f_tape    = je_mm2 / je_tape_mm2                # minimum tape fraction
+    n_tp_min  = max(1, int(np.ceil(f_tape * th / t_tape)))   # tapes needed
+    n_bund    = max(1, int(np.ceil(n_tp_min / n_par)))       # turns / pancake
+    n_tp      = n_par * n_bund                      # tapes / pancake, as wound
+    n_tape    = n_tp * n_pc                         # physical tapes, whole pack
+    n_tot     = n_bund * n_pc                       # electrical turns, pack
+    # smallest n_par that yields this same n_bund: anything above it is tape
+    # bought for nothing (identical Je*, unless packing binds).
+    n_par_min = max(1, int(np.ceil(n_tp_min / n_bund)))
+
+    f_built    = n_tape * a_tape / a_wind           # = n_tp * t_tape / th
+    pitch      = th / n_tp                          # radial pitch, one tape
+    pitch_turn = th / n_bund                        # radial pitch, one turn
+    i0     = je * a_wind / n_tot                    # TERMINAL current [A]
+    i_tape = i0 / n_par                             # per tape [A]
+    i_max  = je_tape_mm2 * t_tape_mm * w_tape_mm    # one tape at B0 [A]
+
+    d.update(f_tape=f_tape, n_tp_min=n_tp_min, n_bund=n_bund, n_tp=n_tp,
+             n_tape=n_tape, n_tot=n_tot, n_par_min=n_par_min,
+             n_par_surplus=n_par - n_par_min,
+             f_built=f_built, j_built=je_mm2 / f_built,
+             pitch=pitch, pitch_turn=pitch_turn,
+             i0=i0, i_tape=i_tape, i_max=i_max, i_margin=i_max / i_tape,
+             len_tape=n_tape * np.pi * (coef["ri"] + coef["rf"]))
 
     # ── inductance from the stored energy ────────────────────────────────
     em_tot = coef["k_e"]    * je ** 2
@@ -694,21 +721,19 @@ def evaluate_design(coef: dict, je_mm2: float,
     l_tot  = 2.0 * em_tot / i0 ** 2                 # Je cancels: geometry x N^2
     l_iso  = 2.0 * em_iso / i0 ** 2
 
-    # "isolated": one resistor per pancake, the dump sees l_iso only.
-    # "series"  : one resistor for the stack, the dump sees l_tot.
     isolated = par.topology == "isolated"
     l_dump, em_dump = (l_iso, em_iso) if isolated else (l_tot, em_tot)
 
     # ── dump circuit ─────────────────────────────────────────────────────
-    r_ee   = par.R_EE
+    u_ee = par.U_EE
+    r_ee   = u_ee/i0
     tau_ee = l_dump / r_ee
+   
     d.update(em_tot=em_tot, em_iso=em_iso, em_dump=em_dump,
              l_tot=l_tot, l_iso=l_iso, l_dump=l_dump,
-             r_ee=r_ee, tau_ee=tau_ee, u_ee=r_ee * i0)
+             r_ee=r_ee, tau_ee=tau_ee, u_ee=u_ee)
 
     # ── hot spot, adiabatic: exponential dump only ───────────────────────
-    # per turn ql = i0^2 tau/2 = E/R.  Smeared over the build j_cu = Je/f_Cu,
-    # so the turn count cancels and only tau matters.
     ql_dump   = 0.5 * i0 ** 2 * tau_ee
     with np.errstate(invalid='ignore', divide='ignore'):
         j_cu_max = np.sqrt(par.gamma_max / (0.5 * tau_ee))
@@ -716,21 +741,25 @@ def evaluate_design(coef: dict, je_mm2: float,
     f_cu_have = f_built * par.fCu                   # Cu already inside the tape
     f_cu_add  = max(f_cu_req - f_cu_have, 0.0)      # co-wound Cu to add
     f_cu_eff  = max(f_cu_req, f_cu_have)            # Cu actually in the build
-    s_cu      = f_cu_eff * a_wind / n_tot           # copper area per turn [m2]
+    s_cu      = f_cu_eff * a_wind / n_tot           # copper area per TURN [m2]
 
     d.update(ql_dump=ql_dump, j_cu_max=j_cu_max, f_cu_req=f_cu_req,
              f_cu_have=f_cu_have, f_cu_add=f_cu_add, f_cu_eff=f_cu_eff,
-             s_cu=s_cu, j_cu=je / f_cu_eff,
+             s_cu=s_cu, s_cu_tape=s_cu / n_par, j_cu=je / f_cu_eff,
+             t_cu_turn=f_cu_add * pitch_turn,
              gamma_op=(je / f_cu_eff) ** 2 * (0.5 * tau_ee),
              m_cu=RHO_CU * f_cu_eff * coef["v_build"])
 
     # ── mechanics: copper carries nothing, tape and filler are structure ─
-    # Ri, Th, L are fixed, so copper changes neither the Lorentz load nor
-    # sigma_hoop.  It changes what is left to carry it: th*(1 - f_Cu).
-    f_struct     = 1.0 - f_cu_eff
-    sigma_struct = sigma_pa / f_struct if f_struct > 0.0 else np.inf
-    fill         = f_built + f_cu_add
-    d.update(f_struct=f_struct, sigma_struct=sigma_struct, fill=fill,
+    f_struct      = 1.0 - f_cu_eff
+    f_struct_tape = f_built * (1.0 - par.fCu)       # non-Cu part of the tape
+    f_filler      = f_struct - f_struct_tape        # added structural material
+    sigma_struct  = sigma_pa / f_struct if f_struct > 0.0 else np.inf
+    sigma_tape    = (sigma_pa / f_struct_tape
+                     if f_struct_tape > 0.0 else np.inf)
+    fill          = f_built + f_cu_add
+    d.update(f_struct=f_struct, f_struct_tape=f_struct_tape, f_filler=f_filler,
+             sigma_struct=sigma_struct, sigma_tape=sigma_tape, fill=fill,
              util=sigma_struct / par.sigma_limit)
 
     # ── binding constraint ───────────────────────────────────────────────
@@ -741,7 +770,6 @@ def evaluate_design(coef: dict, je_mm2: float,
                     "mechanical" if r_mech >= r_fill else "packing")
     d["feasible"] = d["r"] <= 1.0
     return d
-
 
 def solve_design(ri: float = None, rf: float = None, l: float = None,
                  par: DesignParams = DEFAULT_DESIGN,
@@ -801,6 +829,8 @@ def solve_design(ri: float = None, rf: float = None, l: float = None,
     d_lo["n_eval"] = n_ev
     d_lo["je_seed"] = je_stress_only(coef, par, u=1.0) / 1e6      # no copper
     d_lo["b0_seed"] = coef["k_b"] * d_lo["je_seed"] * 1e6
+    d_lo["n_par"] = max(1, int(par.n_par))
+    d_lo["par"]   = par
     d_lo["je_closed_form"] = je_hoop_quench_closed_form(
         coef, d_lo["tau_ee"], par) / 1e6      # exact when mechanics binds
     return d_lo

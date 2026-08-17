@@ -12,10 +12,17 @@
 # for quench protection competing for the same radial build.  Monotone in Je,
 # so the cell solve is a bisection and always converges.
 #
+# Winding: n_par tapes are stacked radially and paralleled into ONE electrical
+# turn (a "bundle").  Two integers therefore describe the pack and they are not
+# interchangeable — n_tp counts TAPES per pancake and drives conductor cost
+# (f_tape_built, length_tape, i_tape), n_bund counts TURNS per pancake and
+# drives the circuit (i0, L, tau_EE, U_EE, and through tau the copper the
+# protection needs).  n_par is fixed by config and never solved for.
+#
 # Naming: every current density ending in _mm2 that describes the tape is per
 # mm² of FULL tape cross-section (w_tape × t_tape), not per mm² of REBCO.
 # f_tape_min is the minimum tape fraction of the pack; f_tape_built is what the
-# integer turn count actually delivers.
+# integer tape count actually delivers.
 # ─────────────────────────────────────────────────────────────────────────────
 import importlib
 import numpy as np
@@ -37,7 +44,8 @@ PROGRESS_EVERY = 25          # cells between progress prints
 # ═════════════════════════════════════════════════════════════════════════════
 # Defaults used when config.py predates a given option. FINE_AT_* default to
 # "min", which is the historical behaviour, so an old config still reproduces
-# the old axes exactly. The design block mirrors solenoid_lib.DesignParams.
+# the old axes exactly. N_PAR defaults to 1, which is the historical winding:
+# one tape per turn. The design block mirrors solenoid_lib.DesignParams.
 _DEFAULTS = {
     "P_RI": 1.0, "P_TH": 2.0, "P_A": 2.0,
     "D0_RI": None, "D0_TH": None, "D0_A": None,
@@ -49,6 +57,7 @@ _DEFAULTS = {
     "U_TARGET": 0.995, "FILL_TARGET": 0.98,
     "F_CU": 0.50, "GAMMA_CU": 5.0e16, "SF_QUENCH": 1.0,
     "TOPOLOGY": "series", "DUMP_MODE": "resistance", "R_EE": 4.0,
+    "N_PAR": 1,
     "QUANTIZE_LENGTH": True, "SOLVER_RTOL": 1e-12,
     "L_COIL": None,
 }
@@ -78,6 +87,7 @@ def design_params():
         topology=_cfg("TOPOLOGY"),
         dump_mode=_cfg("DUMP_MODE"),
         R_EE=_cfg("R_EE"),
+        n_par=int(_cfg("N_PAR")),
     )
 
 
@@ -218,7 +228,7 @@ RESULT_KEYS = {
     "scan":          (None,            1.0,    float, "yr",      "axion scan time"),
     # ── current densities ────────────────────────────────────────────────
     "je_coil":       ("je",            1.0,    float, "A/mm2",   "Je of the whole pack"),
-    "je_tape":       (None,            1.0,    float, "A/mm2",   "J in the tape as built"),
+    "je_tape":       ("j_built",       1.0,    float, "A/mm2",   "J in the tape as built"),
     "je_max":        ("je_tape",       1.0,    float, "A/mm2",   "tape capability at B0"),
     "j_crit":        ("jc_tape",       1.0,    float, "A/mm2",   "tape Jc at B0"),
     "je_mech":       ("je_seed",       1.0,    float, "A/mm2",   "stress-only Je, no copper"),
@@ -227,18 +237,28 @@ RESULT_KEYS = {
     # ── mechanics ────────────────────────────────────────────────────────
     "stress":        ("sigma_pa",      1e-6,   float, "MPa",     "smeared hoop stress"),
     "sigma_struct":  ("sigma_struct",  1e-6,   float, "MPa",     "stress in the structure"),
+    "sigma_tape":    ("sigma_tape",    1e-6,   float, "MPa",     "stress if tape alone carried"),
     "util":          ("util",          1.0,    float, "-",       "sigma_struct / sigma_limit"),
     "f_struct":      ("f_struct",      1.0,    float, "-",       "load-bearing build fraction"),
+    "f_struct_tape": ("f_struct_tape", 1.0,    float, "-",       "structure inside the tape"),
+    "f_filler":      ("f_filler",      1.0,    float, "-",       "added structural material"),
     # ── winding ──────────────────────────────────────────────────────────
+    # n_tp counts TAPES, n_bund counts TURNS. n_tp = n_par * n_bund.
     "f_tape_min":    ("f_tape",        1.0,    float, "-",       "minimum tape fraction"),
     "f_tape_built":  ("f_built",       1.0,    float, "-",       "tape fraction as wound"),
     "fill":          ("fill",          1.0,    float, "-",       "tape + co-wound Cu"),
-    "n_tp":          ("n_tp",          1.0,    float, "-",       "radial turns per pancake"),
-    "n_tot":         ("n_tot",         1.0,    float, "-",       "total turns"),
-    "pitch":         ("pitch",         1e3,    float, "mm",      "radial pitch"),
-    "i0":            ("i0",            1.0,    float, "A",       "operating current per turn"),
+    "n_tp_min":      ("n_tp_min",      1.0,    float, "-",       "tapes needed radially"),
+    "n_tp":          ("n_tp",          1.0,    float, "-",       "tapes per pancake as wound"),
+    "n_bund":        ("n_bund",        1.0,    float, "-",       "electrical turns per pancake"),
+    "n_tape":        ("n_tape",        1.0,    float, "-",       "physical tapes in the pack"),
+    "n_tot":         ("n_tot",         1.0,    float, "-",       "total electrical turns"),
+    "n_par_min":     ("n_par_min",     1.0,    float, "-",       "smallest n_par giving this n_bund"),
+    "pitch":         ("pitch",         1e3,    float, "mm",      "radial pitch, one tape"),
+    "pitch_turn":    ("pitch_turn",    1e3,    float, "mm",      "radial pitch, one turn"),
+    "i0":            ("i0",            1.0,    float, "A",       "terminal current per turn"),
+    "i_tape":        ("i_tape",        1.0,    float, "A",       "current per tape"),
     "i_max":         ("i_max",         1.0,    float, "A",       "tape current limit at B0"),
-    "i_margin":      ("i_margin",      1.0,    float, "-",       "I_max / I0"),
+    "i_margin":      ("i_margin",      1.0,    float, "-",       "I_max / I_tape"),
     "length_tape":   ("len_tape",      1.0,    float, "m",       "tape length in the pack"),
     # ── circuit / quench ─────────────────────────────────────────────────
     "em_tot":        ("em_tot",        1e-6,   float, "MJ",      "stored energy"),
@@ -302,8 +322,7 @@ def _solve_cell(ri, rf, l, v, par):
 
     # derived / non-scalar-mapped entries
     out["v_bore"]      = v
-    out["je_tape"]     = d["je"] / d["f_built"]          # J in the tape as built
-    out["t_cu_add"]    = d["f_cu_add"] * d["pitch"] * 1e3
+    out["t_cu_add"]    = d["t_cu_turn"] * 1e3        # co-wound Cu per TURN [mm]
     out["binding"]     = d["binding"]
     out["binding_code"] = np.int8(solenoid_lib.BINDING_CODES[d["binding"]])
     out["feasible"]    = True
@@ -363,6 +382,7 @@ def _run_scan(ri, th, valid, label, l_built, par):
 def build_thickness_grid():
     par = design_params()
     l_built, n_pc = _length_banner()
+    _winding_banner(par)
 
     ri_vals = make_ri_axis()
     th_vals = make_th_axis()
@@ -383,7 +403,7 @@ def build_thickness_grid():
              "ri_vals": ri_vals, "th_vals": th_vals,
              "ri_edges": cell_edges(ri_vals), "th_edges": cell_edges(th_vals),
              "valid": valid, "l_built": l_built, "n_pc": n_pc,
-             "params": par, **res}
+             "n_par": par.n_par, "params": par, **res}
     _print_summary(grids, ri.size, label="Th",
                    extra={"Th (mm)": th * 1e3})
     return grids
@@ -395,6 +415,7 @@ def build_thickness_grid():
 def build_area_grid():
     par = design_params()
     l_built, n_pc = _length_banner()
+    _winding_banner(par)
 
     ri_vals = make_ri_a_axis()
     a_vals = make_a_axis()
@@ -424,7 +445,7 @@ def build_area_grid():
              "ri_vals": ri_vals, "a_vals": a_vals,
              "ri_edges": cell_edges(ri_vals), "a_edges": cell_edges(a_vals),
              "valid": valid, "l_built": l_built, "n_pc": n_pc,
-             "params": par, **res}
+             "n_par": par.n_par, "params": par, **res}
     _print_summary(grids, ri.size, label="A",
                    extra={"A_total (mm²)": a_total * 1e6,
                           "Th (mm)": np.where(valid, th, np.nan) * 1e3})
@@ -447,6 +468,17 @@ def _length_banner():
     return l_built, n_pc
 
 
+def _winding_banner(par):
+    """State the winding convention once — n_par is fixed, never solved for."""
+    if par.n_par == 1:
+        print(f"  winding: 1 tape per turn (n_par=1), "
+              f"tape {solenoid_lib.t_tape_mm:.3f} mm thick")
+    else:
+        print(f"  winding: n_par={par.n_par} tapes paralleled into one turn "
+              f"({par.n_par * solenoid_lib.t_tape_mm:.3f} mm of build per turn); "
+              f"L falls as 1/n_par^2 at fixed Je")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 7.  Summary
 # ═════════════════════════════════════════════════════════════════════════════
@@ -465,7 +497,7 @@ def _print_summary(grids, total, label, extra=None):
 
     print(f"\n─ {label}-scan summary "
           f"(sigma<={par.sigma_limit/1e6:.0f} MPa @ u={par.u_target}, "
-          f"fill<={par.fill_target}, R_EE={par.R_EE:g} ohm, "
+          f"fill<={par.fill_target}, R_EE={par.R_EE:g} ohm, n_par={par.n_par}, "
           f"gamma_max={par.gamma_max:.2e}) ─")
     print(f"  cells in mask   : {n_valid} / {total}")
     print(f"  feasible        : {n_ok} / {max(n_valid,1)}"
@@ -498,13 +530,37 @@ def _print_summary(grids, total, label, extra=None):
     print(f"  build budget    : tape {_rng(grids['f_tape_built']*100, '%')} | "
           f"Cu {_rng(grids['f_cu_req']*100, '%')} | "
           f"structure {_rng(grids['f_struct']*100, '%')}")
+    print(f"  structure split : tape {_rng(grids['f_struct_tape']*100, '%')} | "
+          f"filler {_rng(grids['f_filler']*100, '%')}")
     print(f"  co-wound Cu     : {_rng(grids['f_cu_add']*100, '%')} "
           f"({np.count_nonzero(grids['f_cu_add'] > 1e-9)} cells need it)")
-    print(f"  turns / pancake : {_rng(grids['n_tp'], '-', '.0f')}")
+
+    # ── winding: n_par is fixed, so say where it is doing nothing ────────
+    # A cell needs only n_par_min = ceil(n_tp_min / n_bund) tapes per bundle to
+    # reach the SAME n_bund, hence the same i0, L, tau and f_cu_req. Anything
+    # above that is conductor bought for no field. Harmless where mechanics
+    # binds (it buys tape margin), actively harmful where packing binds.
+    n_par = par.n_par
+    surplus = ok & (grids["n_par_min"] < n_par)
+    n_surp = int(np.count_nonzero(surplus))
+    print(f"  turns / pancake : {_rng(grids['n_bund'], '-', '.0f')}"
+          f"   tapes / pancake {_rng(grids['n_tp'], '-', '.0f')}"
+          f"   (n_par={n_par} fixed)")
+    print(f"  n_par needed    : {_rng(grids['n_par_min'], '-', '.0f')}"
+          f"   ({n_surp}/{n_ok} cells carry surplus tape)")
+    if n_surp:
+        waste = np.where(surplus, 1.0 - grids["n_par_min"] / n_par, np.nan)
+        n_pack = int(np.count_nonzero(surplus & (grids["binding_code"] == 1)))
+        print(f"                    up to {100*np.nanmax(waste):.0f} % of the "
+              f"conductor is surplus; {n_pack} of those are packing-bound "
+              f"(there the surplus COSTS field)")
     print(f"  I per turn      : {_rng(grids['i0'], 'A', '.0f')}"
-          f"   margin {_rng(grids['i_margin'], '-', '.2f')}")
+          f"   per tape {_rng(grids['i_tape'], 'A', '.0f')}")
+    print(f"  tape margin     : {_rng(grids['i_margin'], '-', '.2f')}"
+          f"   (I_max / I_tape)")
     print(f"  tape length     : {_rng(grids['length_tape']/1e3, 'km')}")
     print(f"  E stored        : {_rng(grids['em_tot'], 'MJ')}")
+    print(f"  L self          : {_rng(grids['l_self'], 'H', '.3f')}")
     print(f"  tau_EE          : {_rng(grids['tau_ee'], 's', '.3f')}"
           f"   U_EE {_rng(grids['u_ee'], 'V', '.0f')}")
     print(f"  Cu mass         : {_rng(grids['m_cu'], 'kg', '.0f')}")
@@ -523,8 +579,12 @@ def _print_summary(grids, total, label, extra=None):
     k = np.unravel_index(np.nanargmax(np.where(ok, b0, -np.inf)), b0.shape)
     print(f"  best B0 cell    : Ri={grids['ri'][k]*1e3:.1f} mm, "
           f"Th={grids['th'][k]*1e3:.1f} mm -> B0={b0[k]:.3f} T, "
-          f"Je={grids['je_coil'][k]:.1f} A/mm2, n_tp={grids['n_tp'][k]:.0f}, "
+          f"Je={grids['je_coil'][k]:.1f} A/mm2, "
+          f"n_bund={grids['n_bund'][k]:.0f}, n_tp={grids['n_tp'][k]:.0f}, "
           f"f_Cu={grids['f_cu_req'][k]*100:.1f} %, limited by {grids['binding'][k]}")
+    print(f"                    U_EE={grids['u_ee'][k]:.0f} V, "
+          f"I0={grids['i0'][k]:.0f} A, tau={grids['tau_ee'][k]:.2f} s, "
+          f"n_par needed {grids['n_par_min'][k]:.0f} of {n_par}")
     if np.any(np.isfinite(grids["scan"])):
         k = np.unravel_index(np.nanargmin(np.where(ok, grids["scan"], np.inf)),
                              b0.shape)
@@ -556,6 +616,7 @@ if __name__ == "__main__":
             A_AXIS_FROM_TH = True
             FINE_AT_RI, FINE_AT_TH, FINE_AT_A = "max", "min", "min"
             SIGMA_LIMIT_PA = 750e6
+            N_PAR = 10
             L_COIL = 4.0
 
         config = MockConfig()
@@ -586,6 +647,8 @@ if __name__ == "__main__":
     print(f"Edges bracket axis : {cell_edges(th)[0] < th[0]} / "
           f"{cell_edges(th)[-1] > th[-1]}")
     if g_th is not None:
+        ok = np.isfinite(g_th["b0"])
+        n_par = g_th["params"].n_par
         print(f"Max f_tape built   : {np.nanmax(g_th['f_tape_built'])*100:.2f} %")
         print(f"Max packing        : {np.nanmax(g_th['fill'])*100:.2f} % "
               f"(target {g_th['params'].fill_target*100:.0f} %)")
@@ -593,5 +656,13 @@ if __name__ == "__main__":
               f"(target {g_th['params'].u_target})")
         print(f"Hot spot respected : "
               f"{bool(np.nanmax(g_th['gamma_op']) <= g_th['params'].gamma_max*(1+1e-9))}")
+        # n_tp = n_par * n_bund must hold in every solved cell, by construction
+        print(f"n_tp = n_par*n_bund: "
+              f"{bool(np.all(g_th['n_tp'][ok] == n_par * g_th['n_bund'][ok]))}")
+        print(f"Tapes cover need   : "
+              f"{bool(np.all(g_th['n_tp'][ok] >= g_th['n_tp_min'][ok]))}")
+        print(f"n_par surplus      : "
+              f"{int(np.count_nonzero(ok & (g_th['n_par_min'] < n_par)))} "
+              f"of {int(np.count_nonzero(ok))} cells")
         print(f"Min tape length    : {np.nanmin(g_th['length_tape'])/1000:.2f} km")
     print("Test passed.")
